@@ -10,6 +10,7 @@ packages = [{include = "backend"}]
 python = "^3.8"
 uvicorn = {extras = ["standard"], version = "^0.27.1"}
 fastapi = "^0.110.0"
+pysimmods = "^0.11.2"
 
 
 [build-system]
