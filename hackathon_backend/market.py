@@ -26,7 +26,6 @@ class AuctionBoard(BaseModel):
     # List of auctions
     pass
 
-
 class Auction:
     # Internal Auction
     pass
