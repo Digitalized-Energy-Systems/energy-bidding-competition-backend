@@ -1,10 +1,16 @@
 from fastapi import APIRouter
+import hackathon_backend.controller as Controller
 
 router = APIRouter()
 
 @router.get("/")
 async def read_root():
     return {"Hello": "World"}
+
+@router.get("/market/open-auctions")
+async def read_auctions():
+    # TODO correct way to use controller
+    return Controller.return_open_auction_params()
 
 
 @router.get("/market/price")
