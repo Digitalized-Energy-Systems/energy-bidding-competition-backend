@@ -1,94 +1,105 @@
-import asyncio
-import random
-import time
+from pysimmods.model.inputs import ModelInputs
 
-import logging
-from pydantic import BaseModel
-
-import uuid
-
-class Bid(BaseModel):
-    aid: str
-    interval: int
-    price: float
-    amount: float
-
-
-class PublicAuction(BaseModel):
-    # Auction for Participants
-    pass
-
-class FullAuction(PublicAuction):
-    # Full Auction Information
-    pass
-
-class AuctionBoard(BaseModel):
-    # List of auctions
-    pass
-
-class Auction:
-    # Internal Auction
-    pass
+class MarketInputs(ModelInputs):
+    """
+    Inherited class from Pysimmods Inputs for market
+    """
 
 class Market:
-    def __init__(self, demands, clearing_interval) -> None:
-        self._clearing_prices = []
-        self._demands = demands
-        self._bids = []
-        self._main_loop = None
-        self._last_clearing = 0
-        self._clearing_interval = clearing_interval
-        self._current_interval = 0
+    """
+    Needed functionality:
+    - receive auctions
+    - receive orders by type and time and map them to auctions
+    - return list of open auctions by type and time
+    - return list of auction results by type and time
+    - step auctions
+    Needed checks:
+    - check if order fits to auction, otherwise return error
+    """
+    
+    def __init__(self):
+        self.inputs: MarketInputs = MarketInputs()
+        self.auctions = {}
+        self.expired_auctions = {}
+    
+    def step(self):
+        current_time = self.inputs.now_dt.timestamp()
+        
+        # Update auction data
+        self.open_auctions = []
+        self.current_auction_results = []
+        # copy to avoid changing dict during iteration
+        auctions = self.auctions.copy()
+        for auction_id, auction in auctions.items():
+            # step auctions
+            auction.step(current_time)
+            if auction.status == 'open':
+                self.open_auctions.append(auction)
+            elif auction.status == 'closed':
+                self.current_auction_results.append(auction.result)
+            elif auction.status == 'expired':
+                self.expired_auctions[auction_id] = auction
+                del self.auctions[auction_id]
+    
+    def receive_auction(self, new_auction):
+        """
+        Receives auctions
+        """
+        self.auctions[new_auction.id] = new_auction
+    
+    # method to return open auctions as a list of dicts
+    def get_open_auctions(self):
+        """
+        Returns open auctions as a list of dicts
+        """
+        return [auction.to_dict() for auction in self.open_auctions]
 
-    def clear_market(self):
-        if self._current_interval > len(self._demands):
-            self._last_clearing = 0
-            return
-        current_interval_bids = [
-            bid for bid in self._bids if bid.interval == self._current_interval
-        ]
-        current_interval_bids.sort(key=lambda v: v.price)
-        amount = 0
-        for bid in current_interval_bids:
-            if amount >= self._demands[self._current_interval]:
-                self._clearing_prices.append(bid.price)
-                break
-            amount += bid.amount
-        self._current_interval += 1
-        self._last_clearing = time.time()
+    # method to return current auction results
+    def get_current_auction_results(self):
+        """
+        Returns current auction results
+        """
+        return self.current_auction_results
 
-    async def update_market(self):
-        await asyncio.sleep(10)
-        while True:
-            await asyncio.sleep(self._clearing_interval)
-            self.clear_market()
-
-    def init(self):
-        self._main_loop = asyncio.create_task(self.update_market())
-
-    def shutdown(self):
-        try:
-            self._main_loop.cancel()
-        except:
-            pass
-
-
-class VirtualBiddingAgent:
-    def __init__(self) -> None:
-        self._aid = str(uuid.uuid1())
-        self._bid_counter = 0
-
-    async def bid(self, sleep_time_in_s):
-        while True:
-            await asyncio.sleep(sleep_time_in_s)
-            bid = Bid(
-                aid=self._aid,
-                interval=self._bid_counter,
-                price=random.random() * 10,
-                amount=15 + random.random() * 10,
+    # method to receive orders and map them to auctions
+    def receive_order(
+        self, amount_kw, price_ct, agent, supply_time, product_type):
+        """
+        Receives orders and maps them to auctions
+        """
+        auction_id = self._get_auction_id_from_supply_time_and_product_type(
+            supply_time, product_type)
+        if auction_id is not None:
+            self.auctions[auction_id].place_order(
+                amount_kw=amount_kw,
+                price_ct=price_ct,
+                agent=agent
             )
-            self._bid_counter += 1
-            await send_bid(bid)
+            return True
+        else:
+            raise ValueError("No auction found for the given supply time and product type")
+            return False # TODO
+    
+    def _get_supply_time_and_product_type_from_auction_id(self, auction_id):
+        """
+        Translates auction_id to supply time and product type
+        """
+        if auction_id in self.auctions:
+            return self.auctions[auction_id].params.supply_start_time, \
+                self.auctions[auction_id].params.product_type
+        else:
+            return None, None
 
-    def init(self):
-        self._main_loop = asyncio.create_task(self.bid(60))
+    # method to translate the supply time and product type of auction to key
+    # within self.auctions
+    def _get_auction_id_from_supply_time_and_product_type(
+        self, supply_time, product_type):
+        """
+        Translates the supply time and product type of auction
+        to key within self.auctions
+        """
+        for auction_id, auction in self.auctions.items():
+            if auction.params.supply_start_time == supply_time \
+                and auction.params.product_type == product_type:
+                return auction_id
+        return None
