@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import List
 import uuid
 import logging
@@ -28,6 +28,7 @@ class AwardedOrder(Order):
 @dataclass 
 class AuctionResult:
     auction_id: str
+    params: AuctionParameters
     clearing_price: float
     awarded_orders: List[AwardedOrder]
 
@@ -62,6 +63,7 @@ class ElectricityAskAuction(Auction):
     """Auction at which market players can sell electricity"""
     def __init__(self, params: AuctionParameters, current_time = None):
         super().__init__(params, current_time)
+        # container for all orders (only one type of order in this case)
         self.order_container = OrderContainer()
         
         # set auction status
@@ -135,12 +137,23 @@ class ElectricityAskAuction(Auction):
                 ))
                 break
         # find clearing price
-        clearing_price = awarded_orders[-1].price_ct
+        if len(awarded_orders) == 0:
+            clearing_price = None
+        else:
+            clearing_price = awarded_orders[-1].price_ct
         
         # store result
         self.result = AuctionResult(
             auction_id=self.id,
+            params=self.params,
             clearing_price=clearing_price,
             awarded_orders=awarded_orders
         )
         return self.result
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "params": asdict(self.params),
+            "status": self.status
+        }
