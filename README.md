@@ -1,7 +1,7 @@
 # install dependencies
 poetry install
 
-# install go in venv
+# open venv
 poetry shell
 
 # start server
