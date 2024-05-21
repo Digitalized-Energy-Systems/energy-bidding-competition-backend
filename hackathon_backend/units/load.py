@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 from .unit import Unit, UnitInput, UnitResult
 
 
@@ -26,11 +26,13 @@ class SimpleDemandUnit(Unit):
 
         self._simple_demand = simple_demand
 
-    def step(self, input: UnitInput, step: int):
+    def step(
+        self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
+    ):
         p, q = self._simple_demand.forecast_demand(step)
         return UnitResult(p_kw=p, q_kvar=q)
 
 
-def create_demand(p_profile: List, q_profile: List, uncertainty: float):
-    # TODO Profile
-    return SimpleDemandUnit(SimpleDemand([], [], 1))
+def create_demand(id, p_profile: List, q_profile: List, uncertainty: float):
+    # TODO Default Profile
+    return SimpleDemandUnit(id, SimpleDemand(p_profile, q_profile, uncertainty))

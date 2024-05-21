@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Dict
 from dataclasses import dataclass
 
 
@@ -25,5 +25,7 @@ class Unit(ABC):
         self.id = id
 
     @abstractmethod
-    def step(self, input: UnitInput, step: int) -> UnitResult:
+    def step(
+        self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
+    ) -> UnitResult:
         return None

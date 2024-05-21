@@ -1,9 +1,10 @@
-from typing import List
+from typing import List, Dict
 from .unit import Unit, UnitInput, UnitResult
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
+import datetime
 
 # TODO PROFILE
-DEFAULT_PV_PROFILE = []
+DEFAULT_PV_PROFILE = [10 for _ in range(96)]
 DEFAULT_CONST_TEMP = 20
 
 
@@ -17,13 +18,18 @@ class MidasPVUnit(Unit):
         self._midas_pp = midas_pp
         self._profile = pv_profile
 
-    def step(self, input: UnitInput, step: int):
+    def step(
+        self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
+    ):
         self._midas_pp.set_q_kvar(input.q_kvar)
         self._midas_pp.set_p_kw(input.p_kw)
         self._midas_pp.set_step_size(input.delta_t)
         self._midas_pp.inputs.bh_w_per_m2 = self._profile[step]
         self._midas_pp.inputs.dh_w_per_m2 = self._profile[step]
         self._midas_pp.inputs.t_air_deg_celsius = DEFAULT_CONST_TEMP
+        self._midas_pp.inputs.now_dt = datetime.datetime(
+            2000, 1, 1, step // 4, (step * 15) // 60, 0, 0
+        )
         self._midas_pp.step()
 
         return UnitResult(
@@ -31,8 +37,9 @@ class MidasPVUnit(Unit):
         )
 
 
-def create_pv_unit(a_m2=15, eta_percent=25, t_module_deg_celsius=25):
+def create_pv_unit(id, a_m2=15, eta_percent=25, t_module_deg_celsius=25):
     return MidasPVUnit(
+        id,
         PhotovoltaicPowerPlant(
             {
                 "a_m2": a_m2,

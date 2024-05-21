@@ -1,20 +1,23 @@
+from typing import Dict
 from .unit import Unit, UnitInput, UnitResult
-from pysimmods.buffer.batterysim.battery import Battery, BatteryState
+from pysimmods.buffer.batterysim.battery import Battery
 
 
-class SimpleBattery(Battery):
-    def _calculate_efficiency(self, nstate: BatteryState):
-        nstate.eta_percent = 100
+class BatteryUnit(Unit):
+    # MARKER
+    pass
 
 
-class MidasBatteryUnit(Unit):
+class MidasBatteryUnit(BatteryUnit):
 
     def __init__(self, id, midas_battery: Battery) -> None:
         super().__init__(id)
 
         self._midas_battery = midas_battery
 
-    def step(self, input: UnitInput):
+    def step(
+        self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
+    ):
         self._midas_battery.set_q_kvar(input.q_kvar)
         self._midas_battery.set_p_kw(input.p_kw)
         self._midas_battery.set_step_size(input.delta_t)
@@ -25,7 +28,8 @@ class MidasBatteryUnit(Unit):
         )
 
 
-def create_pv_unit(
+def create_battery(
+    id,
     cap_kwh=5,
     p_charge_max_kw=1,
     p_discharge_max_kw=1,
@@ -33,13 +37,15 @@ def create_pv_unit(
     initial_soc=50,
 ):
     return MidasBatteryUnit(
-        SimpleBattery(
+        id,
+        Battery(
             {
                 "cap_kwh": cap_kwh,
                 "p_charge_max_kw": p_charge_max_kw,
                 "p_discharge_max_kw": p_discharge_max_kw,
                 "soc_min_percent": soc_min_percent,
+                "eta_pc": [0, 0, 100],
             },
             {"soc_percent": initial_soc},
-        )
+        ),
     )
