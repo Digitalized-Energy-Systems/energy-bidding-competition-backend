@@ -19,7 +19,7 @@ def test_battery_step():
     input = UnitInput(15 * 60, 1, 1)
 
     # WHEN
-    result = battery_unit.step(input)
+    result = battery_unit.step(input, 0)
 
     # THEN
     assert result.p_kw == 1
