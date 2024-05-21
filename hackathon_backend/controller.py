@@ -59,9 +59,9 @@ class Controller:
         auction_parameters = AuctionParameters(
             product_type="electricity",
             gate_opening_time=current_time,
-            gate_closure_time=current_time + datetime.timedelta(hours=1),
-            supply_start_time=current_time + datetime.timedelta(hours=1, minutes=15),
-            supply_duration_s=datetime.timedelta(minutes=15),
+            gate_closure_time=current_time + datetime.timedelta(hours=1).total_seconds(),
+            supply_start_time=current_time + datetime.timedelta(hours=1, minutes=15).total_seconds(),
+            supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
             tender_amount_kw=1000, # TODO adjust tender amount
         )
         # Create a new auction
@@ -73,7 +73,7 @@ class Controller:
     
     def return_open_auction_params(self):
         """ Return open auction params to enable agents to place orders."""
-        return [auction.params for auction in self.market.get_open_auctions()]
+        return [auction["params"] for auction in self.market.get_open_auctions()]
 
     def receive_order(self, agent, order, supply_time):
         

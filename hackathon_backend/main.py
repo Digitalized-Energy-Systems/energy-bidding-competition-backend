@@ -37,3 +37,9 @@ def test_read_auctions():
     response = client.get("/market/open-auctions")
     assert response.status_code == 200
     assert response.json() == []
+
+    interface.controller.step_market(current_time=900)
+    
+    response = client.get("/market/open-auctions")
+    assert response.status_code == 200
+    assert response.json() == []

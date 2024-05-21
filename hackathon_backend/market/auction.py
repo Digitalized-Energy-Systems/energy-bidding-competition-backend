@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict
 from typing import List
 import uuid
@@ -41,22 +42,22 @@ class OrderContainer:
     def add_order(self, order: Order):
         self.orders.append(order)
     
-class Auction:
+class Auction(ABC):
     status: str
     
     def __init__(self, params: AuctionParameters, current_time = None):
         self.id = str(uuid.uuid4())
         self.params = params
         self.result = None
-        
+    
+    @abstractmethod
     def step(self, current_time):
         """Update auction status based on current time and perform 
         time dependent actions"""
-        raise NotImplementedError()
     
+    @abstractmethod
     def place_order(self, amount_kw, price_ct, agent):
         """Place an order in the auction"""
-        raise NotImplementedError()
     
     
 class ElectricityAskAuction(Auction):
