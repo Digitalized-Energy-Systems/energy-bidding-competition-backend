@@ -18,7 +18,8 @@ def test_vpp_battery_adjust_strategy_battery_cant_adjust():
     result = vpp.step(input, 30)
 
     # THEN
-    assert result.p_kw == 8.703380869292287
+    assert result.p_kw == 28.70338086929229
+    assert battery._midas_battery.state.soc_percent == 45
 
 
 def test_vpp_battery_adjust_strategy_battery_can_adjust():
@@ -38,3 +39,4 @@ def test_vpp_battery_adjust_strategy_battery_can_adjust():
 
     # THEN
     assert result.p_kw == 0
+    assert battery._midas_battery.state.soc_percent == 47.57415478267693

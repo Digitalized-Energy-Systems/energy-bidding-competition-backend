@@ -49,11 +49,18 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
             q_kvar=input.q_kvar + q_kvar_sum,
         )
         for unit in [unit for unit in units if isinstance(unit, BatteryUnit)]:
-            result = unit.step(remaining_request, step)
+            result = unit.step(
+                UnitInput(
+                    remaining_request.delta_t,
+                    p_kw=-remaining_request.p_kw,
+                    q_kvar=-remaining_request.q_kvar,
+                ),
+                step,
+            )
             remaining_request = UnitInput(
                 remaining_request.delta_t,
-                p_kw=remaining_request.p_kw - result.p_kw,
-                q_kvar=remaining_request.q_kvar - result.q_kvar,
+                p_kw=remaining_request.p_kw + result.p_kw,
+                q_kvar=remaining_request.q_kvar + result.q_kvar,
             )
 
         return UnitResult(p_kw=remaining_request.p_kw, q_kvar=remaining_request.q_kvar)
