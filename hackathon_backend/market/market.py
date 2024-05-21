@@ -20,6 +20,7 @@ class Market:
     def __init__(self):
         self.inputs: MarketInputs = MarketInputs()
         self.auctions = {}
+        self.open_auctions = []
         self.expired_auctions = {}
     
     def step(self):

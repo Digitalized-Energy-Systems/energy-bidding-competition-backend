@@ -1,6 +1,7 @@
 import asyncio
 import random
 import time, datetime
+from pydantic import BaseModel
 from .market.market import Market, MarketInputs
 from .market.auction import AuctionParameters, ElectricityAskAuction
 
@@ -14,6 +15,8 @@ class Controller:
       - [...]
     - loop over time
     - lock when new time interval is reached
+    - return full auction results for gui
+    First version done:
     - create auctions and pass them to market
     - order handling
       - pass orders to market
@@ -23,11 +26,18 @@ class Controller:
       - filter according to asking agent
       - return full results for gui
     """
-    def __init__(self, market: Market):
-        self.market = market
+    def __init__(self):
+        self.market = Market()
 
     def init(self):
         self._main_loop = asyncio.create_task(self.update_market())
+        
+    async def update_market(self):
+        await asyncio.sleep(10)
+        while True:
+            await asyncio.sleep(1)
+            self.loop()
+
         
     def loop(self):
         # TODO step 15 minutes ahead

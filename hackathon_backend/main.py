@@ -2,35 +2,38 @@ import asyncio
 import random
 import time
 from contextlib import asynccontextmanager
-import hackathon_backend.interface as interface
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import logging
-from pydantic import BaseModel
-
-import uuid
-
-from .market.market import Market, VirtualBiddingAgent, Bid
+import hackathon_backend.interface as interface
 
 logger = logging.getLogger(__name__)
-
-market = Market([10, 20, 30, 20, 20, 50, 20, 10], 60)
-
-v_agent_0 = VirtualBiddingAgent()
-v_agent_1 = VirtualBiddingAgent()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # StartUp
-    market.init()
-    v_agent_0.init()
-    v_agent_1.init()
+    interface.controller.init()
 
     yield
 
     # ShutDown
-    market.shutdown()
+    interface.controller.shutdown()
 
-
+# FastAPI object
 app = FastAPI(lifespan=lifespan)
 app.include_router(interface.router)
+
+
+client = TestClient(app)
+
+def test_read_main():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {"Hello": "World"}
+
+def test_read_auctions():
+    response = client.get("/market/open-auctions")
+    assert response.status_code == 200
+    assert response.json() == []
