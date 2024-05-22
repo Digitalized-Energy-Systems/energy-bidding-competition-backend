@@ -19,6 +19,9 @@ class Market:
     
     def __init__(self):
         self.inputs: MarketInputs = MarketInputs()
+        self.create_empty_attributes()
+    
+    def create_empty_attributes(self):
         self.auctions = {}
         self.open_auctions = []
         self.expired_auctions = {}
@@ -104,3 +107,6 @@ class Market:
                 and auction.params.product_type == product_type:
                 return auction_id
         return None
+
+    def reset(self):
+        self.create_empty_attributes()

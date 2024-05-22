@@ -131,6 +131,9 @@ class Controller:
         await self.check_step_done()
         return {f"{result.params.supply_start_time}_{result.params.product_type}": \
             result for result in self.market.get_current_auction_results()}
+
+    def reset(self):
+        self.market.reset()
     
     def shutdown(self):
         try:
