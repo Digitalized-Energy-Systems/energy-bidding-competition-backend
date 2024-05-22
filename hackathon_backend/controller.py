@@ -52,6 +52,9 @@ class Controller:
             await self.current_task
     
     def step_market(self, current_time):
+        """ Step market to next time interval.
+        :param current_time: Current time in seconds (TODO align to time modelling)
+        """
         market_inputs = MarketInputs()
         market_inputs._now_dt=datetime.datetime.fromtimestamp(current_time) # TODO insert correct time
         market_inputs.step_size=900
@@ -84,6 +87,11 @@ class Controller:
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
     async def receive_order(self, agent, order, supply_time):
+        """ Receive order from agent and pass it to market.
+        :param agent: Agent identifier
+        :param order: Order object
+        :param supply_time: Supply time of the auction (key to select auction)
+        """
         await self.check_step_done()
             
         if self.market.receive_order(
@@ -100,6 +108,9 @@ class Controller:
             pass
     
     async def return_awarded_orders(self, agent):
+        """ Return awarded orders for agent.
+        :param agent: Agent identifier
+        """
         await self.check_step_done()
             
         current_results = self.market.get_current_auction_results()
