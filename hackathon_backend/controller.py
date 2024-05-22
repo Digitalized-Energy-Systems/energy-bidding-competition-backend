@@ -28,21 +28,28 @@ class Controller:
     """
     def __init__(self):
         self.market = Market()
+        self.current_task = asyncio.Future()
+        self.current_task.set_result(None)
 
     def init(self):
         self._main_loop = asyncio.create_task(self.update_market())
         
     async def update_market(self):
-        await asyncio.sleep(10)
-        while True:
-            await asyncio.sleep(1)
-            self.loop()
-
+        # TODO Time for agents to register
+        await asyncio.sleep(20)
         
-    def loop(self):
+        while True:
+            self.current_task = asyncio.create_task(self.loop())
+            await asyncio.sleep(300)
+        
+    async def loop(self):
         # TODO step 15 minutes ahead
         current_time=time.time()
         self.step_market(current_time=current_time)
+    
+    async def check_step_done(self):
+        if not self.current_task.done():
+            await self.current_task
     
     def step_market(self, current_time):
         market_inputs = MarketInputs()
@@ -62,7 +69,7 @@ class Controller:
             gate_closure_time=current_time + datetime.timedelta(hours=1).total_seconds(),
             supply_start_time=current_time + datetime.timedelta(hours=1, minutes=15).total_seconds(),
             supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
-            tender_amount_kw=1000, # TODO adjust tender amount
+            tender_amount_kw=10, # TODO adjust tender amount
         )
         # Create a new auction
         new_auction = ElectricityAskAuction(
@@ -71,12 +78,14 @@ class Controller:
         )
         self.market.receive_auction(new_auction)
     
-    def return_open_auction_params(self):
+    async def return_open_auction_params(self):
         """ Return open auction params to enable agents to place orders."""
+        await self.check_step_done()
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
-    def receive_order(self, agent, order, supply_time):
-        
+    async def receive_order(self, agent, order, supply_time):
+        await self.check_step_done()
+            
         if self.market.receive_order(
             amount_kw=order.amount_kw,
             price_ct=order.price_ct,
@@ -90,7 +99,9 @@ class Controller:
             # TODO return error
             pass
     
-    def return_awarded_orders(self, agent):
+    async def return_awarded_orders(self, agent):
+        await self.check_step_done()
+            
         current_results = self.market.get_current_auction_results()
         relevant_results = {}
         # filter results for agent
@@ -102,10 +113,11 @@ class Controller:
             }
         return relevant_results
     
-    def get_current_auction_results(self):
+    async def get_current_auction_results(self):
         """
         Returns current auction results based on product type and supply time
         """
+        await self.check_step_done()
         return {f"{result.params.supply_start_time}_{result.params.product_type}": \
             result for result in self.market.get_current_auction_results()}
     
