@@ -28,6 +28,8 @@ class Controller:
     """
     def __init__(self):
         self.market = Market()
+        self.current_task = asyncio.Future()
+        self.current_task.set_result(None)
 
     def init(self):
         self._main_loop = asyncio.create_task(self.update_market())

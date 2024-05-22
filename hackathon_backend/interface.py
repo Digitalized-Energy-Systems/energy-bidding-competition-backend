@@ -11,8 +11,7 @@ async def read_root():
 
 @router.get("/market/open-auctions")
 async def read_auctions():
-    # TODO correct way to use controller
-    return controller.return_open_auction_params()
+    return await controller.return_open_auction_params()
 
 
 # @router.get("/market/price")
