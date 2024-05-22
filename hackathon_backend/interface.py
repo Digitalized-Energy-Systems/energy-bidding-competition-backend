@@ -9,6 +9,7 @@ controller = Controller()
 async def read_root():
     return {"Hello": "World"}
 
+## market
 @router.get("/market/open-auctions")
 async def read_auctions():
     # TODO correct way to use controller
@@ -24,6 +25,10 @@ async def read_auctions():
 #         ]
 #     }
 
+## units
+@router.put("/unit/load/forecast/")
+async def get_load_forecast(agent: str):
+    return controller.return_load_forecast(agent=agent)
 
 # @router.put("/market/bid/")
 # async def send_bid(bid: Bid):

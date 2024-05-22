@@ -32,7 +32,14 @@ class SimpleDemandUnit(Unit):
         p, q = self._simple_demand.forecast_demand(step)
         return UnitResult(p_kw=p, q_kvar=q)
 
+    def get_forecast(self, start_index, end_index):
+        # TODO specify time frame of forecast
+        forecast = []
+        for i in range(start_index, end_index):
+            forecast.append(self._simple_demand.forecast_demand(i))
+        return forecast
 
 def create_demand(id, p_profile: List, q_profile: List, uncertainty: float):
     # TODO Default Profile
     return SimpleDemandUnit(id, SimpleDemand(p_profile, q_profile, uncertainty))
+

@@ -2,6 +2,7 @@ import asyncio
 import random
 import time, datetime
 from pydantic import BaseModel
+from .units.pool import UnitPool, allocate_default_actor_units
 from .market.market import Market, MarketInputs
 from .market.auction import AuctionParameters, ElectricityAskAuction
 
@@ -28,6 +29,7 @@ class Controller:
     """
     def __init__(self):
         self.market = Market()
+        self.unit_pool = {} # TODO agent ids as key
 
     def init(self):
         self._main_loop = asyncio.create_task(self.update_market())
@@ -38,15 +40,20 @@ class Controller:
             await asyncio.sleep(1)
             self.loop()
 
-        
     def loop(self):
         # TODO step 15 minutes ahead
         current_time=time.time()
         self.step_market(current_time=current_time)
+
+    def create_agent(self):
+        agent_id, root_vpp = allocate_default_actor_units()
+        self.unit_pool[agent_id] = root_vpp
+        return agent_id
     
     def step_market(self, current_time):
         market_inputs = MarketInputs()
-        market_inputs._now_dt=datetime.datetime.fromtimestamp(current_time) # TODO insert correct time
+        market_inputs._now_dt=datetime.datetime.fromtimestamp(
+            current_time) # TODO insert correct time
         market_inputs.step_size=900
         self.market.inputs = market_inputs
 
@@ -59,8 +66,10 @@ class Controller:
         auction_parameters = AuctionParameters(
             product_type="electricity",
             gate_opening_time=current_time,
-            gate_closure_time=current_time + datetime.timedelta(hours=1).total_seconds(),
-            supply_start_time=current_time + datetime.timedelta(hours=1, minutes=15).total_seconds(),
+            gate_closure_time=current_time + \
+                datetime.timedelta(hours=1).total_seconds(),
+            supply_start_time=current_time + \
+                datetime.timedelta(hours=1, minutes=15).total_seconds(),
             supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
             tender_amount_kw=1000, # TODO adjust tender amount
         )
@@ -76,7 +85,6 @@ class Controller:
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
     def receive_order(self, agent, order, supply_time):
-        
         if self.market.receive_order(
             amount_kw=order.amount_kw,
             price_ct=order.price_ct,
@@ -108,6 +116,9 @@ class Controller:
         """
         return {f"{result.params.supply_start_time}_{result.params.product_type}": \
             result for result in self.market.get_current_auction_results()}
+    
+    def return_load_forecast(self, agent):
+        return self.unit_pool[agent].sub_units["d0"].get_forecast(0, 4)
     
     def shutdown(self):
         try:

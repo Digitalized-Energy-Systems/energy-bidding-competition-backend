@@ -28,10 +28,15 @@ class UnitPool:
 
 def allocate_default_actor_units(demand_size=5):
     # TODO full generation of units
+    # TODO specify pv profile
     new_actor_id = uuid4()
     root_vpp = VPP()
-    profile_day = [demand_size for _ in range(96)]
-    root_vpp.add_unit(create_demand("d0", profile_day, profile_day, 1))
-    root_vpp.add_unit(create_pv_unit("pb0"))
-    root_vpp.add_unit(create_battery("b0"))
+    p_profile_day = [demand_size for _ in range(96)]
+    q_profile_day = [demand_size+1 for _ in range(96)]
+    id = "d0"
+    root_vpp.add_unit(id, create_demand(id, p_profile_day, q_profile_day, 1))
+    id = "pb0"
+    root_vpp.add_unit(id, create_pv_unit(id))
+    id = "b0"
+    root_vpp.add_unit(id, create_battery(id))
     return new_actor_id, root_vpp

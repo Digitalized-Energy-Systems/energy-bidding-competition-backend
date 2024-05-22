@@ -40,3 +40,16 @@ def test_create_demand():
     assert demand_unit._simple_demand._perfect_demand_p_kw[0] == 1
     assert demand_unit._simple_demand._perfect_demand_p_kvar[0] == 2
     assert demand_unit._simple_demand._uncertainty == 1
+
+def test_get_forecast():
+    # GIVEN
+    demand_unit = SimpleDemandUnit(
+        "d1",
+        SimpleDemand([1, 2, 3], [0, 1, 0], 1),
+    )
+
+    # WHEN
+    forecast = demand_unit.get_forecast(0, 3)
+
+    # THEN
+    assert forecast == [(1, 0), (2, 1), (3, 0)]
