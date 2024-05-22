@@ -1,11 +1,17 @@
 from typing import List, Dict
-from .unit import Unit, UnitInput, UnitResult
+from dataclasses import dataclass
+from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
 import datetime
 
 # TODO PROFILE
 DEFAULT_PV_PROFILE = [10 for _ in range(96)]
 DEFAULT_CONST_TEMP = 20
+
+
+@dataclass
+class PVInformation(UnitInformation):
+    forecast_pv_p_kw: List[float]
 
 
 class MidasPVUnit(Unit):
@@ -35,6 +41,9 @@ class MidasPVUnit(Unit):
         return UnitResult(
             p_kw=self._midas_pp.get_p_kw(), q_kvar=self._midas_pp.get_q_kvar()
         )
+
+    def read_information(self) -> UnitInformation:
+        return PVInformation(self.id, DEFAULT_PV_PROFILE)
 
 
 def create_pv_unit(id, a_m2=15, eta_percent=25, t_module_deg_celsius=25):

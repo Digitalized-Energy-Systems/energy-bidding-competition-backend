@@ -1,9 +1,27 @@
 import asyncio
 import random
 import time, datetime
+from typing import List
 from pydantic import BaseModel
 from .market.market import Market, MarketInputs
 from .market.auction import AuctionParameters, ElectricityAskAuction
+from hackathon_backend.units.pool import (
+    UnitInformation,
+    UnitPool,
+    allocate_default_actor_units,
+)
+
+# TODO
+PARTICIPANTS = {"A", "B", "C"}
+
+
+class ControlException(Exception):
+    def __init__(self, code, message, *args: object) -> None:
+        super().__init__(*args)
+
+        self.code = code
+        self.message = message
+
 
 class Controller:
     """
@@ -26,112 +44,141 @@ class Controller:
       - filter according to asking agent
       - return full results for gui
     """
+
     def __init__(self):
         self.market = Market()
+        self.unit_pool = UnitPool()
         self.current_task = asyncio.Future()
         self.current_task.set_result(None)
+        self.registered = set()
 
     def init(self):
         self._main_loop = asyncio.create_task(self.update_market())
-        
+
     async def update_market(self):
         # TODO Time for agents to register
         await asyncio.sleep(20)
-        
+
         while True:
             self.current_task = asyncio.create_task(self.loop())
             await asyncio.sleep(300)
-        
+
     async def loop(self):
         # TODO step 15 minutes ahead
-        current_time=time.time()
+        current_time = time.time()
         self.step_market(current_time=current_time)
-    
+
     async def check_step_done(self):
         if not self.current_task.done():
             await self.current_task
-    
+
     def step_market(self, current_time):
-        """ Step market to next time interval.
+        """Step market to next time interval.
         :param current_time: Current time in seconds (TODO align to time modelling)
         """
         market_inputs = MarketInputs()
-        market_inputs._now_dt=datetime.datetime.fromtimestamp(current_time) # TODO insert correct time
-        market_inputs.step_size=900
+        market_inputs._now_dt = datetime.datetime.fromtimestamp(
+            current_time
+        )  # TODO insert correct time
+        market_inputs.step_size = 900
         self.market.inputs = market_inputs
 
-        self.initiate_electricity_ask_auction(current_time)        
-        
+        self.initiate_electricity_ask_auction(current_time)
+
         self.market.step()
-    
+
     def initiate_electricity_ask_auction(self, current_time):
         # Create AuctionParameters object
         auction_parameters = AuctionParameters(
             product_type="electricity",
             gate_opening_time=current_time,
-            gate_closure_time=current_time + datetime.timedelta(hours=1).total_seconds(),
-            supply_start_time=current_time + datetime.timedelta(hours=1, minutes=15).total_seconds(),
+            gate_closure_time=current_time
+            + datetime.timedelta(hours=1).total_seconds(),
+            supply_start_time=current_time
+            + datetime.timedelta(hours=1, minutes=15).total_seconds(),
             supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
-            tender_amount_kw=10, # TODO adjust tender amount
+            tender_amount_kw=10,  # TODO adjust tender amount
         )
         # Create a new auction
         new_auction = ElectricityAskAuction(
-            params=auction_parameters,
-            current_time=current_time
+            params=auction_parameters, current_time=current_time
         )
         self.market.receive_auction(new_auction)
-    
+
+    async def register_agent(self, participant_id: str) -> List[UnitInformation]:
+        await self.check_step_done()
+
+        if participant_id in PARTICIPANTS:
+            if participant_id in self.registered:
+                raise ControlException(400, "The participant is already registered!")
+            self.registered.add(participant_id)
+        else:
+            raise ControlException(403, "The requester is unknown!")
+
+        actor_id, root_unit = allocate_default_actor_units()
+        self.unit_pool.insert_actor_root(actor_id, root_unit)
+        return self.unit_pool.read_units(actor_id)
+
+    async def read_units(self, actor_id) -> List[UnitInformation]:
+        await self.check_step_done()
+
+        return self.unit_pool.read_units(actor_id)
+
     async def return_open_auction_params(self):
-        """ Return open auction params to enable agents to place orders."""
+        """Return open auction params to enable agents to place orders."""
         await self.check_step_done()
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
     async def receive_order(self, agent, order, supply_time):
-        """ Receive order from agent and pass it to market.
+        """Receive order from agent and pass it to market.
         :param agent: Agent identifier
         :param order: Order object
         :param supply_time: Supply time of the auction (key to select auction)
         """
         await self.check_step_done()
-            
+
         if self.market.receive_order(
             amount_kw=order.amount_kw,
             price_ct=order.price_ct,
             agent=agent,
             supply_time=supply_time,
-            product_type="electricity"
+            product_type="electricity",
+            auction_id=order.auction_id,
         ):
-            # TODO return confirmation
-            pass
+            return True
         else:
-            # TODO return error
-            pass
-    
+            raise ControlException(404, "The specified auction does not exist!")
+
     async def return_awarded_orders(self, agent):
-        """ Return awarded orders for agent.
+        """Return awarded orders for agent.
         :param agent: Agent identifier
         """
         await self.check_step_done()
-            
+
         current_results = self.market.get_current_auction_results()
         relevant_results = {}
         # filter results for agent
         for auction_result in current_results:
             relevant_results[auction_result.params.supply_start_time] = {
-                "order": [awarded_order for awarded_order in \
-                    auction_result.awarded_orders if awarded_order.agent == agent],
-                "clearing_price": auction_result.clearing_price
+                "order": [
+                    awarded_order
+                    for awarded_order in auction_result.awarded_orders
+                    if awarded_order.agent == agent
+                ],
+                "clearing_price": auction_result.clearing_price,
             }
         return relevant_results
-    
+
     async def get_current_auction_results(self):
         """
         Returns current auction results based on product type and supply time
         """
         await self.check_step_done()
-        return {f"{result.params.supply_start_time}_{result.params.product_type}": \
-            result for result in self.market.get_current_auction_results()}
-    
+        return {
+            f"{result.params.supply_start_time}_{result.params.product_type}": result
+            for result in self.market.get_current_auction_results()
+        }
+
     def shutdown(self):
         try:
             self._main_loop.cancel()

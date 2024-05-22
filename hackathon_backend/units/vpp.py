@@ -1,6 +1,9 @@
 from copy import copy
 from abc import abstractmethod, ABC
 from typing import List, Dict
+from dataclasses import dataclass
+
+from hackathon_backend.units.unit import UnitInformation
 from .unit import Unit, UnitInput, UnitResult
 from .battery import BatteryUnit
 
@@ -66,6 +69,11 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
         return UnitResult(p_kw=remaining_request.p_kw, q_kvar=remaining_request.q_kvar)
 
 
+@dataclass
+class VPPInformation(UnitInformation):
+    unit_information_list: List[UnitInformation]
+
+
 class VPP(Unit):
     strategy: VPPStrategy
     sub_units: List[Unit]
@@ -96,3 +104,8 @@ class VPP(Unit):
             return self.strategy.step(
                 input=input, other_inputs=other_inputs, units=self.sub_units, step=step
             )
+
+    def read_information(self) -> VPPInformation:
+        return VPPInformation(
+            self.id, [unit.read_information() for unit in self.sub_units]
+        )

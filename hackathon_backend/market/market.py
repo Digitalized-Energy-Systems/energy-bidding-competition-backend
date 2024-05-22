@@ -1,9 +1,11 @@
 from pysimmods.model.inputs import ModelInputs
 
+
 class MarketInputs(ModelInputs):
     """
     Inherited class from Pysimmods Inputs for market
     """
+
 
 class Market:
     """
@@ -16,16 +18,16 @@ class Market:
     Needed checks:
     - check if order fits to auction, otherwise return error
     """
-    
+
     def __init__(self):
         self.inputs: MarketInputs = MarketInputs()
         self.auctions = {}
         self.open_auctions = []
         self.expired_auctions = {}
-    
+
     def step(self):
         current_time = self.inputs.now_dt.timestamp()
-        
+
         # Update auction data
         self.open_auctions = []
         self.current_auction_results = []
@@ -34,20 +36,20 @@ class Market:
         for auction_id, auction in auctions.items():
             # step auctions
             auction.step(current_time)
-            if auction.status == 'open':
+            if auction.status == "open":
                 self.open_auctions.append(auction)
-            elif auction.status == 'closed':
+            elif auction.status == "closed":
                 self.current_auction_results.append(auction.result)
-            elif auction.status == 'expired':
+            elif auction.status == "expired":
                 self.expired_auctions[auction_id] = auction
                 del self.auctions[auction_id]
-    
+
     def receive_auction(self, new_auction):
         """
         Receives auctions
         """
         self.auctions[new_auction.id] = new_auction
-    
+
     # method to return open auctions as a list of dicts
     def get_open_auctions(self):
         """
@@ -64,43 +66,49 @@ class Market:
 
     # method to receive orders and map them to auctions
     def receive_order(
-        self, amount_kw, price_ct, agent, supply_time, product_type):
+        self, amount_kw, price_ct, agent, supply_time, product_type, auction_id=None
+    ):
         """
         Receives orders and maps them to auctions
         """
-        auction_id = self._get_auction_id_from_supply_time_and_product_type(
-            supply_time, product_type)
-        if auction_id is not None:
+        actual_auction_id = auction_id
+        if auction_id is None:
+            actual_auction_id = self._get_auction_id_from_supply_time_and_product_type(
+                supply_time, product_type
+            )
+        if actual_auction_id is not None:
             self.auctions[auction_id].place_order(
-                amount_kw=amount_kw,
-                price_ct=price_ct,
-                agent=agent
+                amount_kw=amount_kw, price_ct=price_ct, agent=agent
             )
             return True
         else:
-            raise ValueError("No auction found for the given supply time and product type")
-            return False # TODO
-    
+            return False
+
     def _get_supply_time_and_product_type_from_auction_id(self, auction_id):
         """
         Translates auction_id to supply time and product type
         """
         if auction_id in self.auctions:
-            return self.auctions[auction_id].params.supply_start_time, \
-                self.auctions[auction_id].params.product_type
+            return (
+                self.auctions[auction_id].params.supply_start_time,
+                self.auctions[auction_id].params.product_type,
+            )
         else:
             return None, None
 
     # method to translate the supply time and product type of auction to key
     # within self.auctions
     def _get_auction_id_from_supply_time_and_product_type(
-        self, supply_time, product_type):
+        self, supply_time, product_type
+    ):
         """
         Translates the supply time and product type of auction
         to key within self.auctions
         """
         for auction_id, auction in self.auctions.items():
-            if auction.params.supply_start_time == supply_time \
-                and auction.params.product_type == product_type:
+            if (
+                auction.params.supply_start_time == supply_time
+                and auction.params.product_type == product_type
+            ):
                 return auction_id
         return None

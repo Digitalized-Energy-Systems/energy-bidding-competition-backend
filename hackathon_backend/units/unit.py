@@ -4,6 +4,11 @@ from dataclasses import dataclass
 
 
 @dataclass
+class UnitInformation:
+    unit_id: str
+
+
+@dataclass
 class UnitInput:
     delta_t: Optional[float]
     p_kw: Optional[float]
@@ -28,4 +33,8 @@ class Unit(ABC):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ) -> UnitResult:
+        return None
+
+    @abstractmethod
+    def read_information(self) -> UnitInformation:
         return None

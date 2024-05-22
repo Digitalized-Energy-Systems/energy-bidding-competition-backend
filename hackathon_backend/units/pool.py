@@ -1,10 +1,21 @@
 from uuid import UUID, uuid4
-from typing import Dict
-from .unit import Unit, UnitInput
-from .vpp import VPP
+from typing import Dict, List
+from .unit import Unit, UnitInput, UnitInformation
+from .vpp import VPP, VPPInformation
 from .load import create_demand
 from .battery import create_battery
 from .pv import create_pv_unit
+
+
+def _flatten_unit_information(unit_information):
+    if type(unit_information) == VPPInformation:
+        all_information = []
+        for sub_ui in unit_information.unit_information_list:
+            f_sub_ui = _flatten_unit_information(sub_ui)
+            all_information += f_sub_ui
+        return all_information
+    else:
+        return [unit_information]
 
 
 class UnitPool:
@@ -24,6 +35,11 @@ class UnitPool:
 
     def insert_actor_root(self, actor: UUID, unit_root: Unit):
         self.actor_to_root[actor] = unit_root
+
+    def read_units(self, actor: UUID) -> List[UnitInformation]:
+        root = self.actor_to_root[actor]
+        unit_information = root.read_information()
+        return _flatten_unit_information(unit_information)
 
 
 def allocate_default_actor_units(demand_size=5):

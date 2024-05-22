@@ -1,5 +1,12 @@
 from typing import List, Dict
-from .unit import Unit, UnitInput, UnitResult
+from dataclasses import dataclass
+from .unit import Unit, UnitInput, UnitResult, UnitInformation
+
+
+@dataclass
+class DemandInformation(UnitInformation):
+    forecast_demand_p_kw: List[float]
+    forecast_demand_q_kw: List[float]
 
 
 class SimpleDemand:
@@ -31,6 +38,10 @@ class SimpleDemandUnit(Unit):
     ):
         p, q = self._simple_demand.forecast_demand(step)
         return UnitResult(p_kw=p, q_kvar=q)
+
+    def read_information(self) -> DemandInformation:
+        p, q = self._simple_demand.forecast_demand()
+        return DemandInformation(self.id, p, q)
 
 
 def create_demand(id, p_profile: List, q_profile: List, uncertainty: float):
