@@ -179,6 +179,9 @@ class Controller:
             for result in self.market.get_current_auction_results()
         }
 
+    def reset(self):
+        self.market.reset()
+    
     def shutdown(self):
         try:
             self._main_loop.cancel()

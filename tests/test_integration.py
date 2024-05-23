@@ -9,14 +9,24 @@ import pytest
 from hackathon_backend.main import lifespan
 import hackathon_backend.interface as interface
 
-
-@pytest.mark.anyio
-async def test_read_auctions():# FastAPI object
-    # GIVEN
+@pytest.fixture
+async def setup_controller():
+    # setup code
     app = FastAPI(lifespan=lifespan)
     app.include_router(interface.router)
+    yield app  # this is where the test will start
+
+    # teardown code
+    interface.controller.reset()
+
+@pytest.mark.anyio
+async def test_read_auctions(setup_controller):
+    # GIVEN
+    # FastAPI object
+    app = setup_controller
+    app.include_router(interface.router)
     # WHEN
-    async with AsyncClient(app=app, base_url="http://test") as ac:        
+    async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.get("/market/open-auctions")
     # THEN
     assert response.status_code == 200
@@ -25,7 +35,7 @@ async def test_read_auctions():# FastAPI object
     # GIVEN
     interface.controller.step_market(current_time=900)
     # WHEN
-    async with AsyncClient(app=app, base_url="http://test") as ac:        
+    async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.get("/market/open-auctions")
     # THEN
     assert response.status_code == 200
@@ -35,7 +45,7 @@ async def test_read_auctions():# FastAPI object
     # GIVEN
     interface.controller.step_market(current_time=1800)
     # WHEN
-    async with AsyncClient(app=app, base_url="http://test") as ac:        
+    async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.get("/market/open-auctions")
     # THEN
     assert response.status_code == 200
