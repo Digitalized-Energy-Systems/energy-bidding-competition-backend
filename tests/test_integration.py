@@ -27,7 +27,7 @@ async def test_read_auctions(setup_controller):
     app.include_router(interface.router)
     # WHEN
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/market/open-auctions")
+        response = await ac.get("/market/auction/open")
     # THEN
     assert response.status_code == 200
     assert response.json() == []
@@ -36,7 +36,7 @@ async def test_read_auctions(setup_controller):
     interface.controller.step_market(current_time=900)
     # WHEN
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/market/open-auctions")
+        response = await ac.get("/market/auction/open")
     # THEN
     assert response.status_code == 200
     print(response.json())
@@ -46,7 +46,7 @@ async def test_read_auctions(setup_controller):
     interface.controller.step_market(current_time=1800)
     # WHEN
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/market/open-auctions")
+        response = await ac.get("/market/auction/open/")
     # THEN
     assert response.status_code == 200
     print(response.json())

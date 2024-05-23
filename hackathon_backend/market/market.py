@@ -74,12 +74,11 @@ class Market:
         """
         Receives orders and maps them to auctions
         """
-        actual_auction_id = auction_id
         if auction_id is None:
-            actual_auction_id = self._get_auction_id_from_supply_time_and_product_type(
+            auction_id = self._get_auction_id_from_supply_time_and_product_type(
                 supply_time, product_type
             )
-        if actual_auction_id is not None:
+        if auction_id is not None:
             self.auctions[auction_id].place_order(
                 amount_kw=amount_kw, price_ct=price_ct, agent=agent
             )
