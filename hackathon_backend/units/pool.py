@@ -8,6 +8,8 @@ from .pv import create_pv_unit
 
 
 def _flatten_unit_information(unit_information):
+    """Flatten information from unit tree to list of unit information.
+    """
     if type(unit_information) == VPPInformation:
         all_information = []
         for sub_ui in unit_information.unit_information_list:
@@ -19,6 +21,9 @@ def _flatten_unit_information(unit_information):
 
 
 class UnitPool:
+    """Container to store units which are organized in a tree structure.
+    They belong to actors identified by UUIDs and their information is
+    returned as a list of unit information."""
     actor_to_root: Dict[UUID, Unit]
 
     def __init__(self) -> None:
@@ -37,6 +42,7 @@ class UnitPool:
         self.actor_to_root[actor] = unit_root
 
     def read_units(self, actor: UUID) -> List[UnitInformation]:
+        """Initiate reading of unit information and flatten it."""
         root = self.actor_to_root[actor]
         unit_information = root.read_information()
         return _flatten_unit_information(unit_information)
