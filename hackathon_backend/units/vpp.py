@@ -62,13 +62,17 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
                 step,
             )
             print(f'Unit {unit.id} result: {result}')
+            p_kw_sum += result.p_kw
+            q_kvar_sum += result.q_kvar
+            
+            # rest for next battery
             remaining_request = UnitInput(
                 remaining_request.delta_t,
                 p_kw=remaining_request.p_kw + result.p_kw,
                 q_kvar=remaining_request.q_kvar + result.q_kvar,
             )
 
-        return UnitResult(p_kw=remaining_request.p_kw, q_kvar=remaining_request.q_kvar)
+        return UnitResult(p_kw=p_kw_sum, q_kvar=q_kvar_sum)
 
 
 @dataclass

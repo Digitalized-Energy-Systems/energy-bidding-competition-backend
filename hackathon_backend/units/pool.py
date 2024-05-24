@@ -49,7 +49,7 @@ class UnitPool:
         return _flatten_unit_information(unit_information)
 
 
-def allocate_default_actor_units(demand_size=5):
+def allocate_default_actor_units(demand_size=4):
     # TODO full generation of units
     new_actor_id = uuid4()
     root_vpp = VPP()

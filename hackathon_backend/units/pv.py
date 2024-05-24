@@ -4,8 +4,8 @@ from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
 import datetime
 
-# TODO PROFILE
-DEFAULT_PV_PROFILE = [1200 for _ in range(96)]
+# TODO PROFILE, typically between 0 and 1000 in Germany (w_per_m2)?
+DEFAULT_PV_PROFILE = [1000 for _ in range(96)]
 DEFAULT_CONST_TEMP = 20
 
 

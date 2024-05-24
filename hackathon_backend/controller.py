@@ -3,8 +3,9 @@ import random
 import time, datetime
 from typing import List
 from pydantic import BaseModel
+from .units.unit import UnitInput
 from .market.market import Market, MarketInputs
-from .market.auction import AuctionParameters, ElectricityAskAuction
+from .market.auction import initiate_electricity_ask_auction
 from hackathon_backend.units.pool import (
     UnitInformation,
     UnitPool,
@@ -53,29 +54,31 @@ class Controller:
         self.registered = set()
 
     def init(self):
-        self._main_loop = asyncio.create_task(self.update_market())
+        self._main_loop = asyncio.create_task(self.initiate_stepping())
 
-    async def update_market(self):
+    async def initiate_stepping(self):
         # TODO Time for agents to register
-        await asyncio.sleep(20)
+        await asyncio.sleep(2)
+        time_step = 0
 
-        while True:
-            self.current_task = asyncio.create_task(self.loop())
-            await asyncio.sleep(300)
+        while True: # provide number of simulated time steps
+            self.current_task = asyncio.create_task(self.loop(time_step))
+            await asyncio.sleep(3)
+            time_step += 1
 
-    async def loop(self):
+    async def loop(self, time_step):
         # TODO step 15 minutes ahead
         current_time = time.time()
+        current_time = time_step * 900
         self.step_market(current_time=current_time)
-
-    async def check_step_done(self):
-        if not self.current_task.done():
-            await self.current_task
+        self.step_units(current_time=current_time)
+        print(f'Step finished...{current_time}')
 
     def step_market(self, current_time):
         """Step market to next time interval.
         :param current_time: Current time in seconds (TODO align to time modelling)
         """
+        print(f'Step Market {current_time}...')
         market_inputs = MarketInputs()
         market_inputs._now_dt = datetime.datetime.fromtimestamp(
             current_time
@@ -83,41 +86,59 @@ class Controller:
         market_inputs.step_size = 900
         self.market.inputs = market_inputs
 
-        self.initiate_electricity_ask_auction(current_time)
-
+        # insert new acution into market
+        self.market.receive_auction(
+            initiate_electricity_ask_auction(
+                current_time,
+                tender_amount=10
+            )
+        )
         self.market.step()
 
-    def initiate_electricity_ask_auction(self, current_time):
-        # Create AuctionParameters object
-        auction_parameters = AuctionParameters(
-            product_type="electricity",
-            gate_opening_time=current_time,
-            gate_closure_time=current_time
-            + datetime.timedelta(hours=1).total_seconds(),
-            supply_start_time=current_time
-            + datetime.timedelta(hours=1, minutes=15).total_seconds(),
-            supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
-            tender_amount_kw=10,  # TODO adjust tender amount
-        )
-        # Create a new auction
-        new_auction = ElectricityAskAuction(
-            params=auction_parameters, current_time=current_time
-        )
-        self.market.receive_auction(new_auction)
+    def step_units(self, current_time):
+        print(f'Step Units {current_time}...')
 
+        market_results = self.market.get_current_auction_results()
+        for actor_id in self.unit_pool.actor_to_root.keys():
+            # retrieve setpoint from awarded orders
+            setpoint = 0
+            for result in market_results:
+                if result.params.supply_start_time == current_time:
+                    for order in result.awarded_orders:
+                        if order.agent == actor_id:
+                            setpoint += order.amount_kw
+            # step actor
+            actor_result = self.unit_pool.step_actor(
+                uuid=actor_id,
+                input=UnitInput(
+                    delta_t=900,
+                    p_kw=setpoint,
+                    q_kvar=0,
+                ),
+                step=current_time // 900,
+                other_inputs=[]
+            )
+            print(f'Finished actor {actor_id}... {actor_result}')
+
+    async def check_step_done(self):
+        if not self.current_task.done():
+            await self.current_task
+    
     async def register_agent(self, participant_id: str) -> List[UnitInformation]:
         await self.check_step_done()
+        print(f'Registering agent {participant_id}...')
 
         if participant_id in PARTICIPANTS:
             if participant_id in self.registered:
                 raise ControlException(400, "The participant is already registered!")
             self.registered.add(participant_id)
+            print(f'Registered agent {participant_id}...')
         else:
             raise ControlException(403, "The requester is unknown!")
 
         actor_id, root_unit = allocate_default_actor_units()
         self.unit_pool.insert_actor_root(actor_id, root_unit)
-        return self.unit_pool.read_units(actor_id)
+        return actor_id, self.unit_pool.read_units(actor_id)
 
     async def read_units(self, actor_id) -> List[UnitInformation]:
         await self.check_step_done()
@@ -143,7 +164,6 @@ class Controller:
             agent=agent,
             supply_time=supply_time,
             product_type="electricity",
-            auction_id=order.auction_id,
         ):
             return True
         else:
