@@ -66,7 +66,7 @@ class Market:
         Returns current auction results
         """
         return {
-            f"{result.params.supply_start_time}_{result.params.product_type}": result
+            f"{int(result.params.supply_start_time)}_{result.params.product_type}": result
             for result in self.current_auction_results
         }
 

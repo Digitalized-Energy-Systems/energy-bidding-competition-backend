@@ -14,6 +14,8 @@ from hackathon_backend.units.pool import (
 from hackathon_backend.accounting.accounter import (
     ElectricityAskAuctionAccounter as Accounter
 )
+from hackathon_backend.accounting.account import Account
+
 
 # TODO
 PARTICIPANTS = {"A", "B", "C"}
@@ -55,6 +57,7 @@ class Controller:
         self.current_task = asyncio.Future()
         self.current_task.set_result(None)
         self.registered = set()
+        self.actor_accounts = {}
 
     def init(self):
         self._main_loop = asyncio.create_task(self.initiate_stepping())
@@ -72,10 +75,17 @@ class Controller:
     async def loop(self, time_step):
         # TODO step 15 minutes ahead
         current_time = time.time()
-        current_time = time_step * 900
+        current_time = time_step * 900        
+
+        self.current_time = current_time # only for testing
+        
         self.step_market(current_time=current_time)
         self.step_units(current_time=current_time)
         print(f'Step finished...{current_time}')
+    
+    async def get_current_time(self): # only for testing
+        await self.check_step_done()
+        return self.current_time
 
     def step_market(self, current_time):
         """Step market to next time interval.
@@ -102,8 +112,9 @@ class Controller:
         print(f'Step Units {current_time}...')
 
         market_results = self.market.get_current_auction_results()
-        accounter = Accounter(
-            auction_result=market_results[f'{current_time}_electricity'])
+        accounter = None
+        accounter = Accounter(auction_result=market_results.get(
+            f'{current_time}_electricity', None))
 
         for actor_id in self.unit_pool.actor_to_root.keys():
             # retrieve setpoint from awarded orders
@@ -120,8 +131,16 @@ class Controller:
                 step=current_time // 900,
                 other_inputs=[]
             )
+            print(f'Stepped units of actor {actor_id}... {actor_result}')
+            
             payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
-            print(f'Finished actor {actor_id}... {actor_result}')
+            # store transaction in account
+            self.actor_accounts[actor_id].add_transaction(
+                awarded_amount=setpoint,
+                provided_power=actor_result.p_kw, 
+                payoff=payoff)
+            print(f'Payoff for actor {actor_id}... {payoff}')
+                
 
     async def check_step_done(self):
         if not self.current_task.done():
@@ -141,7 +160,7 @@ class Controller:
 
         actor_id, root_unit = allocate_default_actor_units()
         self.unit_pool.insert_actor_root(actor_id, root_unit)
-        self.actor_accounts[actor_id] = 0
+        self.actor_accounts[actor_id] = Account()
         return actor_id, self.unit_pool.read_units(actor_id)
 
     async def read_units(self, actor_id) -> List[UnitInformation]:

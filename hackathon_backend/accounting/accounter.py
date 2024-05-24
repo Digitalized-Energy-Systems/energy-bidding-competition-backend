@@ -4,9 +4,10 @@ import pandas as pd
 class ElectricityAskAuctionAccounter:
     def __init__(self, auction_result: AuctionResult):
         self.result = auction_result
-        self.awarded_orders = self.generate_agent_dataframes()
+        if auction_result is not None:
+            self.awarded_orders = self._generate_agent_dataframes()
 
-    def generate_agent_dataframes(self, ascending=True):
+    def _generate_agent_dataframes(self, ascending=True):
         agent_dataframes = {}
         for awarded_order in self.result.awarded_orders:
             agent = awarded_order.agent
@@ -28,13 +29,13 @@ class ElectricityAskAuctionAccounter:
         return agent_dataframes
     
     def return_awarded_sum(self, agent):
-        if agent not in self.awarded_orders:
+        if self.result is None or agent not in self.awarded_orders:
             return 0
         
         return self.awarded_orders[agent]["Amount in kW"].sum()
     
     def calculate_payoff(self, agent, total_provided_amount):
-        if agent not in self.awarded_orders:
+        if self.result is None or agent not in self.awarded_orders:
             return 0
         
         total_awarded_amount = sum(self.awarded_orders[agent]["Amount in kW"])
