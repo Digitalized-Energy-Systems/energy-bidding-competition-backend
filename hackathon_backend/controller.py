@@ -11,6 +11,9 @@ from hackathon_backend.units.pool import (
     UnitPool,
     allocate_default_actor_units,
 )
+from hackathon_backend.accounting.accounter import (
+    ElectricityAskAuctionAccounter as Accounter
+)
 
 # TODO
 PARTICIPANTS = {"A", "B", "C"}
@@ -99,14 +102,13 @@ class Controller:
         print(f'Step Units {current_time}...')
 
         market_results = self.market.get_current_auction_results()
+        accounter = Accounter(
+            auction_result=market_results[f'{current_time}_electricity'])
+
         for actor_id in self.unit_pool.actor_to_root.keys():
             # retrieve setpoint from awarded orders
-            setpoint = 0
-            for result in market_results:
-                if result.params.supply_start_time == current_time:
-                    for order in result.awarded_orders:
-                        if order.agent == actor_id:
-                            setpoint += order.amount_kw
+            setpoint = accounter.return_awarded_sum(actor_id)
+            
             # step actor
             actor_result = self.unit_pool.step_actor(
                 uuid=actor_id,
@@ -118,6 +120,7 @@ class Controller:
                 step=current_time // 900,
                 other_inputs=[]
             )
+            payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
             print(f'Finished actor {actor_id}... {actor_result}')
 
     async def check_step_done(self):
@@ -138,6 +141,7 @@ class Controller:
 
         actor_id, root_unit = allocate_default_actor_units()
         self.unit_pool.insert_actor_root(actor_id, root_unit)
+        self.actor_accounts[actor_id] = 0
         return actor_id, self.unit_pool.read_units(actor_id)
 
     async def read_units(self, actor_id) -> List[UnitInformation]:
@@ -178,7 +182,7 @@ class Controller:
         current_results = self.market.get_current_auction_results()
         relevant_results = {}
         # filter results for agent
-        for auction_result in current_results:
+        for auction_result in current_results.values():
             relevant_results[auction_result.params.supply_start_time] = {
                 "order": [
                     awarded_order
@@ -194,10 +198,7 @@ class Controller:
         Returns current auction results based on product type and supply time
         """
         await self.check_step_done()
-        return {
-            f"{result.params.supply_start_time}_{result.params.product_type}": result
-            for result in self.market.get_current_auction_results()
-        }
+        return self.market.get_current_auction_results()
 
     def reset(self):
         self.market.reset()
