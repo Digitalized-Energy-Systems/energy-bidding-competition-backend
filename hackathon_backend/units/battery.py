@@ -27,6 +27,7 @@ class MidasBatteryUnit(BatteryUnit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
+        print(f'Step Battery {self.id} with input {input} and step {step}')
         self._midas_battery.set_q_kvar(input.q_kvar)
         self._midas_battery.set_p_kw(input.p_kw)
         self._midas_battery.set_step_size(input.delta_t)

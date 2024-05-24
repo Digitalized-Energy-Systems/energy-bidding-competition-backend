@@ -43,6 +43,7 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
         # to deliver the remaining energy as best as possible
         for unit in [unit for unit in units if not isinstance(unit, BatteryUnit)]:
             result = unit.step(input, step)
+            print(f'Unit {unit.id} result: {result}')
             p_kw_sum += result.p_kw
             q_kvar_sum += result.q_kvar
 
@@ -60,6 +61,7 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
                 ),
                 step,
             )
+            print(f'Unit {unit.id} result: {result}')
             remaining_request = UnitInput(
                 remaining_request.delta_t,
                 p_kw=remaining_request.p_kw + result.p_kw,
@@ -90,6 +92,7 @@ class VPP(Unit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
+        print(f'Step VPP {self.id} with input {input} and step {step}')
         if self.strategy is None:
             # just step if no strategy shall be applied
             for sub_unit in self.sub_units:
