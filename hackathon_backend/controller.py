@@ -1,8 +1,8 @@
 import asyncio
-import random
-import time, datetime
+import time, datetime, json
 from typing import List
 from pydantic import BaseModel
+from dataclasses import dataclass
 from .market.market import Market, MarketInputs
 from .market.auction import AuctionParameters, ElectricityAskAuction
 from hackathon_backend.units.pool import (
@@ -11,8 +11,7 @@ from hackathon_backend.units.pool import (
     allocate_default_actor_units,
 )
 
-# TODO
-PARTICIPANTS = {"A", "B", "C"}
+DEFAULT_CONFIG_FILE = "config.json"
 
 
 class ControlException(Exception):
@@ -21,6 +20,24 @@ class ControlException(Exception):
 
         self.code = code
         self.message = message
+
+
+class Config:
+    participants: List[str]
+    rt_step_duration_s: float
+    pause: bool
+
+    def __init__(self, payload) -> None:
+        self.__dict__ = payload
+
+
+def load_config(config_file) -> Config:
+    with open(config_file) as f:
+        return Config(json.load(f))
+
+
+def load_default_config() -> Config:
+    return load_config(DEFAULT_CONFIG_FILE)
 
 
 class Controller:
@@ -45,23 +62,27 @@ class Controller:
       - return full results for gui
     """
 
-    def __init__(self):
+    def __init__(self, config: Config = None):
         self.market = Market()
         self.unit_pool = UnitPool()
         self.current_task = asyncio.Future()
         self.current_task.set_result(None)
         self.registered = set()
+        self.config = load_default_config() if config is None else config
+        self.step = 0
 
     def init(self):
         self._main_loop = asyncio.create_task(self.update_market())
 
     async def update_market(self):
-        # TODO Time for agents to register
-        await asyncio.sleep(20)
+        await asyncio.sleep(self.config.rt_step_duration_s)
 
         while True:
+            while self.config.pause:
+                asyncio.sleep(1)
+
             self.current_task = asyncio.create_task(self.loop())
-            await asyncio.sleep(300)
+            await asyncio.sleep(self.config.rt_step_duration_s)
 
     async def loop(self):
         # TODO step 15 minutes ahead
@@ -108,7 +129,7 @@ class Controller:
     async def register_agent(self, participant_id: str) -> List[UnitInformation]:
         await self.check_step_done()
 
-        if participant_id in PARTICIPANTS:
+        if participant_id in self.config.participants:
             if participant_id in self.registered:
                 raise ControlException(400, "The participant is already registered!")
             self.registered.add(participant_id)
@@ -117,7 +138,7 @@ class Controller:
 
         actor_id, root_unit = allocate_default_actor_units()
         self.unit_pool.insert_actor_root(actor_id, root_unit)
-        return self.unit_pool.read_units(actor_id)
+        return actor_id, self.unit_pool.read_units(actor_id)
 
     async def read_units(self, actor_id) -> List[UnitInformation]:
         await self.check_step_done()
@@ -181,7 +202,7 @@ class Controller:
 
     def reset(self):
         self.market.reset()
-    
+
     def shutdown(self):
         try:
             self._main_loop.cancel()

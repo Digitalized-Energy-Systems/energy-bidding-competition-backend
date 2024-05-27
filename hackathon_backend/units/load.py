@@ -40,7 +40,7 @@ class SimpleDemandUnit(Unit):
         return UnitResult(p_kw=p, q_kvar=q)
 
     def read_information(self) -> DemandInformation:
-        p, q = self._simple_demand.forecast_demand()
+        p, q = self._simple_demand.forecast_demand(0)
         return DemandInformation(self.id, p, q)
 
 

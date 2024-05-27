@@ -1,3 +1,4 @@
+import json
 from typing import List
 from fastapi import APIRouter, HTTPException
 from hackathon_backend.controller import Controller, ControlException
@@ -17,9 +18,17 @@ async def read_root():
 
 @router.post("/hackathon/register")
 @router.post("/hackathon/register/")
-async def register_actor(participant_id: str) -> List[UnitInformation]:
+async def register_actor(participant_id: str):
     try:
-        return await controller.register_agent(participant_id)
+        actor_id, unit_information_list = await controller.register_agent(
+            participant_id
+        )
+        return json.dumps(
+            {
+                "units": [ui.__dict__ for ui in unit_information_list],
+                "actor_id": str(actor_id),
+            }
+        )
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 

@@ -1,0 +1,9 @@
+{
+    "participants": [
+        "TestA",
+        "TestB",
+        "TestC"
+    ],
+    "rt_step_duration_s": 360,
+    "pause": false
+}
