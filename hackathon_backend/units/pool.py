@@ -56,7 +56,7 @@ def allocate_default_actor_units(demand_size=4):
     root_vpp = VPP()
     p_profile_day = [demand_size for _ in range(96)]
     q_profile_day = [demand_size + 1 for _ in range(96)]
-    root_vpp.add_unit(create_demand("d0", p_profile_day, q_profile_day, 1))
-    root_vpp.add_unit(create_pv_unit("pb0"))
-    root_vpp.add_unit(create_battery("b0"))
+    root_vpp.add_unit("d0", create_demand("d0", p_profile_day, q_profile_day, 1))
+    root_vpp.add_unit("pb0", create_pv_unit("pb0"))
+    root_vpp.add_unit("b0", create_battery("b0"))
     return new_actor_id, root_vpp

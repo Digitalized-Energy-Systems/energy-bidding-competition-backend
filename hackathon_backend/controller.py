@@ -30,6 +30,7 @@ class ControlException(Exception):
 class Config:
     participants: List[str]
     rt_step_duration_s: float
+    rt_step_init_delay_s: float
     pause: bool
 
     def __init__(self, payload) -> None:
@@ -80,8 +81,8 @@ class Controller:
     def init(self):
         self._main_loop = asyncio.create_task(self.initiate_stepping())
 
-    async def update_market(self):
-        await asyncio.sleep(self.config.rt_step_duration_s)
+    async def initiate_stepping(self):
+        await asyncio.sleep(self.config.rt_step_init_delay_s)
 
         while True:
             while self.config.pause:

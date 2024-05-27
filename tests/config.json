@@ -4,6 +4,7 @@
         "TestB",
         "TestC"
     ],
-    "rt_step_duration_s": 360,
+    "rt_step_duration_s": 3,
+    "rt_step_init_delay_s": 1,
     "pause": false
 }

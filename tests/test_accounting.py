@@ -4,18 +4,24 @@ test cases:
 - test order placed
 - test auction results correctly returned
 """
+
 import pytest
 import asyncio, anyio
 from dataclasses import dataclass
 from hackathon_backend.market.market import *
 from hackathon_backend.market.auction import *
-from hackathon_backend.controller import Controller
+from hackathon_backend.controller import Controller, load_config
 from hackathon_backend.accounting.accounter import (
-    ElectricityAskAuctionAccounter as Accounter
+    ElectricityAskAuctionAccounter as Accounter,
 )
 from fastapi import FastAPI
 from hackathon_backend.main import lifespan
 import hackathon_backend.interface as interface
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 @dataclass
@@ -23,6 +29,7 @@ class Order:
     agent: str
     amount_kw: float
     price_ct: float
+
 
 # @pytest.fixture
 # async def setup_controller():
@@ -33,49 +40,56 @@ class Order:
 
 #     # teardown code
 #     interface.controller.reset()
-    
+
+
 @pytest.mark.anyio
-async def test_accounting(): #setup_controller):
+async def test_accounting():  # setup_controller):
     # GIVEN
     # rng = random.Random(42)
     # set up controller
-    controller = Controller() #interface.controller
+    controller = Controller()  # interface.controller
+    controller.config = load_config("tests/config.json")
     controller.init()
     # set up first agent
-    actor_id, units = await controller.register_agent("A")
+    actor_id, units = await controller.register_agent("TestA")
     balance = None
     # wait for registration time end
-    await asyncio.sleep(4)
-    
+    await asyncio.sleep(
+        controller.config.rt_step_init_delay_s
+        + controller.config.rt_step_duration_s
+        + 1
+    )
+
     for i in range(7):
         # WHEN
         # place order in last auction
         open_auctions = await controller.return_open_auction_params()
         print(open_auctions)
         placed_order = await controller.receive_order(
-            actor_id, 
-            Order(agent=actor_id, amount_kw=1, price_ct=1), 
-            supply_time=open_auctions[-1]["supply_start_time"]
+            actor_id,
+            Order(agent=actor_id, amount_kw=1, price_ct=1),
+            supply_time=open_auctions[-1]["supply_start_time"],
         )
-        print(f'Order placed sucessfull: {placed_order}')
-    
-        print(f'Relevant orders: \n{await controller.return_awarded_orders(actor_id)}')
-        
+        print(f"Order placed sucessfull: {placed_order}")
+
+        print(f"Relevant orders: \n{await controller.return_awarded_orders(actor_id)}")
+
         # THEN
         # check account before step
         current_time = await controller.get_current_time()
-        print(f'Time: {current_time}')
-        if current_time >= 4*900:
+        print(f"Time: {current_time}")
+        if current_time >= 4 * 900:
             balance = controller.actor_accounts[actor_id].balance
-            
+
         await asyncio.sleep(3)
-        
+
         # check account after step
         if balance is not None:
             assert controller.actor_accounts[actor_id].balance == balance + 1
-            
-    print(f'Account transactions: {controller.actor_accounts[actor_id].transactions}')
+
+    print(f"Account transactions: {controller.actor_accounts[actor_id].transactions}")
     # assert 0 == 1
+
 
 def test_empty_accounter():
     # GIVEN
@@ -85,11 +99,18 @@ def test_empty_accounter():
     assert accounter.return_awarded_sum("A") == 0
     assert accounter.calculate_payoff("A", 1) == 0
 
+
 def test_sum_calculation():
     # GIVEN
-    
-    orders1 = [Order(agent=ag, amount_kw=1, price_ct=pr) for ag, pr in zip(["A", "B", "C"], [1, 2, 3])]
-    orders2 = [Order(agent=ag, amount_kw=1, price_ct=pr) for ag, pr in zip(["A", "B", "C"], [4, 5, 6])]
+
+    orders1 = [
+        Order(agent=ag, amount_kw=1, price_ct=pr)
+        for ag, pr in zip(["A", "B", "C"], [1, 2, 3])
+    ]
+    orders2 = [
+        Order(agent=ag, amount_kw=1, price_ct=pr)
+        for ag, pr in zip(["A", "B", "C"], [4, 5, 6])
+    ]
     orders = orders1 + orders2
     auction = ElectricityAskAuction(
         AuctionParameters(
@@ -100,22 +121,29 @@ def test_sum_calculation():
             supply_duration_s=1,
             tender_amount_kw=4.5,
         ),
-        current_time=0
+        current_time=0,
     )
     for order in orders:
         auction.place_order(order.amount_kw, order.price_ct, order.agent)
     # WHEN
     accounter = Accounter(auction_result=auction.clear())
-    
+
     # THEN
     assert accounter.return_awarded_sum("A") == 2
     assert accounter.return_awarded_sum("B") == 1.5
     assert accounter.return_awarded_sum("C") == 1
-    
+
+
 def test_payoff_calculation():
     # GIVEN
-    orders1 = [Order(agent=ag, amount_kw=1, price_ct=pr) for ag, pr in zip(["A", "B", "C"], [1, 2, 3])]
-    orders2 = [Order(agent=ag, amount_kw=1, price_ct=pr) for ag, pr in zip(["A", "B", "C"], [4, 5, 6])]
+    orders1 = [
+        Order(agent=ag, amount_kw=1, price_ct=pr)
+        for ag, pr in zip(["A", "B", "C"], [1, 2, 3])
+    ]
+    orders2 = [
+        Order(agent=ag, amount_kw=1, price_ct=pr)
+        for ag, pr in zip(["A", "B", "C"], [4, 5, 6])
+    ]
     orders = orders1 + orders2
     auction = ElectricityAskAuction(
         AuctionParameters(
@@ -126,13 +154,13 @@ def test_payoff_calculation():
             supply_duration_s=1,
             tender_amount_kw=4.5,
         ),
-        current_time=0
+        current_time=0,
     )
     for order in orders:
         auction.place_order(order.amount_kw, order.price_ct, order.agent)
     # WHEN
     accounter = Accounter(auction_result=auction.clear())
-    
+
     # THEN
     assert accounter.calculate_payoff("A", 2) == 5
     assert accounter.calculate_payoff("A", 1.5) == 3
