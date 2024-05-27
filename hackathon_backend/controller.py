@@ -1,8 +1,7 @@
 import asyncio
 import time, datetime, json
 from typing import List
-from pydantic import BaseModel
-from dataclasses import dataclass
+from .units.pool import UnitPool, allocate_default_actor_units
 from .market.market import Market, MarketInputs
 from .market.auction import AuctionParameters, ElectricityAskAuction
 from hackathon_backend.units.pool import (
@@ -202,6 +201,11 @@ class Controller:
 
     def reset(self):
         self.market.reset()
+
+        return {
+            f"{result.params.supply_start_time}_{result.params.product_type}": result
+            for result in self.market.get_current_auction_results()
+        }
 
     def shutdown(self):
         try:

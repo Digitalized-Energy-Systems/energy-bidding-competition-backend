@@ -76,23 +76,23 @@ class VPPInformation(UnitInformation):
 
 class VPP(Unit):
     strategy: VPPStrategy
-    sub_units: List[Unit]
+    sub_units: Dict[str, Unit]
 
     def __init__(self, strategy=BatteryAdjustVPPStrategy()):
         super().__init__(VPP_ID)
 
         self.strategy = strategy
-        self.sub_units = []
+        self.sub_units = {}
 
-    def add_unit(self, unit: Unit):
-        self.sub_units.append(unit)
+    def add_unit(self, id, unit: Unit):
+        self.sub_units[id] = unit
 
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
         if self.strategy is None:
             # just step if no strategy shall be applied
-            for sub_unit in self.sub_units:
+            for sub_unit in self.sub_units.values():
                 # leaf only
                 if other_inputs is not None and sub_unit.id in other_inputs:
                     sub_unit.step(
