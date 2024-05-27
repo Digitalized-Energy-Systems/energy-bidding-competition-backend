@@ -45,7 +45,7 @@ async def test_accounting(): #setup_controller):
     actor_id, units = await controller.register_agent("A")
     balance = None
     # wait for registration time end
-    await asyncio.sleep(4)
+    await asyncio.sleep(7)
     
     for i in range(7):
         # WHEN
@@ -66,13 +66,13 @@ async def test_accounting(): #setup_controller):
         current_time = await controller.get_current_time()
         print(f'Time: {current_time}')
         if current_time >= 4*900:
-            balance = controller.actor_accounts[actor_id].balance
+            balance = controller.actor_accounts[actor_id].get_balance()
             
         await asyncio.sleep(3)
         
         # check account after step
         if balance is not None:
-            assert controller.actor_accounts[actor_id].balance == balance + 1
+            assert controller.actor_accounts[actor_id].get_balance() == balance + 1
             
     print(f'Account transactions: {controller.actor_accounts[actor_id].transactions}')
     # assert 0 == 1

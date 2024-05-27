@@ -68,8 +68,8 @@ class Controller:
         time_step = 0
 
         while True: # provide number of simulated time steps
-            self.current_task = asyncio.create_task(self.loop(time_step))
             await asyncio.sleep(3)
+            self.current_task = asyncio.create_task(self.loop(time_step))
             time_step += 1
 
     async def loop(self, time_step):
