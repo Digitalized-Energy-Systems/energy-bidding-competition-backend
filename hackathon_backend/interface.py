@@ -1,4 +1,5 @@
 import json
+from uuid import UUID
 from typing import List
 from fastapi import APIRouter, HTTPException
 from hackathon_backend.controller import Controller, ControlException
@@ -35,9 +36,14 @@ async def register_actor(participant_id: str):
 
 @router.get("/units/information")
 @router.get("/units/information/")
-async def read_unit_information(actor_id: str) -> UnitInformation:
+async def read_unit_information(actor_id: str):
     try:
-        return await controller.read_units(actor_id)
+        unit_information_list = await controller.read_units(UUID(actor_id))
+        return json.dumps(
+            {
+                "units": [ui.__dict__ for ui in unit_information_list],
+            }
+        )
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 
@@ -46,16 +52,22 @@ async def read_unit_information(actor_id: str) -> UnitInformation:
 @router.get("/market/auction/open/")
 async def read_auctions():
     # try:
-    return await controller.return_open_auction_params()
+    return {"auctions": await controller.return_open_auction_params()}
     # except ControlException as e:
     #     raise HTTPException(e.code, e.message)
 
 
 @router.put("/market/order")
 @router.put("/market/order/")
-async def place_order(actor_id: str, order: Order, supply_time=None):
+async def place_order(
+    actor_id: str, amount_kw: float, price_ct: float, supply_time: int
+):
     try:
-        return await controller.receive_order(actor_id, order, supply_time=supply_time)
+        return {
+            "order_ok": await controller.receive_order(
+                UUID(actor_id), amount_kw, price_ct, supply_time
+            )
+        }
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 
@@ -64,6 +76,6 @@ async def place_order(actor_id: str, order: Order, supply_time=None):
 @router.get("/market/auction/result/")
 async def read_auction_result(actor_id: str):
     try:
-        return await controller.return_awarded_orders(actor_id)
+        return await controller.return_awarded_orders(UUID(actor_id))
     except ControlException as e:
         raise HTTPException(e.code, e.message)

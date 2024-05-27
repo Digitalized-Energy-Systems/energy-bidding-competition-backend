@@ -42,6 +42,9 @@ class UnitPool:
     def insert_actor_root(self, actor: UUID, unit_root: Unit):
         self.actor_to_root[actor] = unit_root
 
+    def has_actor(self, actor_id: UUID):
+        return actor_id in self.actor_to_root
+
     def read_units(self, actor: UUID) -> List[UnitInformation]:
         """Initiate reading of unit information and flatten it."""
         root = self.actor_to_root[actor]

@@ -182,6 +182,8 @@ class Controller:
     async def read_units(self, actor_id) -> List[UnitInformation]:
         await self.check_step_done()
 
+        if not self.unit_pool.has_actor(actor_id):
+            raise ControlException(404, "The actor id does not exist!")
         return self.unit_pool.read_units(actor_id)
 
     async def return_open_auction_params(self):
@@ -189,7 +191,7 @@ class Controller:
         await self.check_step_done()
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
-    async def receive_order(self, agent, order, supply_time):
+    async def receive_order(self, agent, amount_kw, price_ct, supply_time):
         """Receive order from agent and pass it to market.
         :param agent: Agent identifier
         :param order: Order object
@@ -198,8 +200,8 @@ class Controller:
         await self.check_step_done()
 
         if self.market.receive_order(
-            amount_kw=order.amount_kw,
-            price_ct=order.price_ct,
+            amount_kw=amount_kw,
+            price_ct=price_ct,
             agent=agent,
             supply_time=supply_time,
             product_type="electricity",
