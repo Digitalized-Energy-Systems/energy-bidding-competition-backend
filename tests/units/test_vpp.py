@@ -12,13 +12,13 @@ def test_vpp_battery_adjust_strategy_battery_cant_adjust():
     vpp.add_unit(create_demand("d0", profile_day, profile_day, 1))
     vpp.add_unit(create_pv_unit("pb0"))
     vpp.add_unit(battery)
-    input = UnitInput(15 * 60, 20, 20)
+    input = UnitInput(15 * 60, 40, 40)
 
     # WHEN
     result = vpp.step(input, 30)
 
     # THEN
-    assert result.p_kw == 28.70338086929229
+    assert result.p_kw == 4.9027956143842175
     assert battery._midas_battery.state.soc_percent == 45
 
 
@@ -32,11 +32,11 @@ def test_vpp_battery_adjust_strategy_battery_can_adjust():
     vpp.add_unit(create_demand("d0", profile_day, profile_day, 1))
     vpp.add_unit(create_pv_unit("pb0"))
     vpp.add_unit(battery)
-    input = UnitInput(15 * 60, 5, 20)
+    input = UnitInput(15 * 60, 40, 20)
 
     # WHEN
     result = vpp.step(input, 30)
 
     # THEN
     assert result.p_kw == 0
-    assert battery._midas_battery.state.soc_percent == 47.57415478267693
+    assert battery._midas_battery.state.soc_percent == 49.524301096403946

@@ -27,8 +27,8 @@ class MidasPVUnit(Unit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
-        print(f'Step PV {self.id} with input {input} and step {step}')
-        self._midas_pp.set_p_kw(DEFAULT_PV_PROFILE[step]) # TODO insert power value
+        print(f"Step PV {self.id} with input {input} and step {step}")
+        self._midas_pp.set_p_kw(DEFAULT_PV_PROFILE[step])  # TODO insert power value
         self._midas_pp.set_q_kvar(input.q_kvar)
         self._midas_pp.set_step_size(input.delta_t)
         self._midas_pp.inputs.bh_w_per_m2 = self._profile[step]
@@ -51,10 +51,7 @@ def create_pv_unit(id, a_m2=15, eta_percent=25, t_module_deg_celsius=25):
     return MidasPVUnit(
         id,
         PhotovoltaicPowerPlant(
-            {
-                "a_m2": a_m2,
-                "eta_percent": eta_percent,
-            },
+            {"a_m2": a_m2, "eta_percent": eta_percent, "is_static_t_module": True},
             {"t_module_deg_celsius": t_module_deg_celsius},
         ),
         pv_profile=DEFAULT_PV_PROFILE,

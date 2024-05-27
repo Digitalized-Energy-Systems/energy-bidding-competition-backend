@@ -79,13 +79,13 @@ async def test_accounting():  # setup_controller):
         current_time = await controller.get_current_time()
         print(f"Time: {current_time}")
         if current_time >= 4 * 900:
-            balance = controller.actor_accounts[actor_id].balance
+            balance = controller.actor_accounts[actor_id].get_balance()
 
-        await asyncio.sleep(3)
+        await asyncio.sleep(controller.config.rt_step_duration_s + 1)
 
         # check account after step
         if balance is not None:
-            assert controller.actor_accounts[actor_id].balance == balance + 1
+            assert controller.actor_accounts[actor_id].get_balance() == balance + 1
 
     print(f"Account transactions: {controller.actor_accounts[actor_id].transactions}")
     # assert 0 == 1
