@@ -65,7 +65,10 @@ class Market:
         """
         Returns current auction results
         """
-        return self.current_auction_results
+        return {
+            f"{int(result.params.supply_start_time)}_{result.params.product_type}": result
+            for result in self.current_auction_results
+        }
 
     # method to receive orders and map them to auctions
     def receive_order(

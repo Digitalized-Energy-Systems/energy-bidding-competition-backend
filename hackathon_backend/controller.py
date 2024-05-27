@@ -2,13 +2,19 @@ import asyncio
 import time, datetime, json
 from typing import List
 from .units.pool import UnitPool, allocate_default_actor_units
+from .units.unit import UnitInput
 from .market.market import Market, MarketInputs
-from .market.auction import AuctionParameters, ElectricityAskAuction
+from .market.auction import initiate_electricity_ask_auction
 from hackathon_backend.units.pool import (
     UnitInformation,
     UnitPool,
     allocate_default_actor_units,
 )
+from hackathon_backend.accounting.accounter import (
+    ElectricityAskAuctionAccounter as Accounter,
+)
+from hackathon_backend.accounting.account import Account
+
 
 DEFAULT_CONFIG_FILE = "config.json"
 
@@ -69,9 +75,10 @@ class Controller:
         self.registered = set()
         self.config = load_default_config() if config is None else config
         self.step = 0
+        self.actor_accounts = {}
 
     def init(self):
-        self._main_loop = asyncio.create_task(self.update_market())
+        self._main_loop = asyncio.create_task(self.initiate_stepping())
 
     async def update_market(self):
         await asyncio.sleep(self.config.rt_step_duration_s)
@@ -80,22 +87,30 @@ class Controller:
             while self.config.pause:
                 asyncio.sleep(1)
 
-            self.current_task = asyncio.create_task(self.loop())
             await asyncio.sleep(self.config.rt_step_duration_s)
+            self.current_task = asyncio.create_task(self.loop(self.step))
+            self.step += 1
 
-    async def loop(self):
+    async def loop(self, time_step):
         # TODO step 15 minutes ahead
         current_time = time.time()
-        self.step_market(current_time=current_time)
+        current_time = time_step * 900
 
-    async def check_step_done(self):
-        if not self.current_task.done():
-            await self.current_task
+        self.current_time = current_time  # only for testing
+
+        self.step_market(current_time=current_time)
+        self.step_units(current_time=current_time)
+        print(f"Step finished...{current_time}")
+
+    async def get_current_time(self):  # only for testing
+        await self.check_step_done()
+        return self.current_time
 
     def step_market(self, current_time):
         """Step market to next time interval.
         :param current_time: Current time in seconds (TODO align to time modelling)
         """
+        print(f"Step Market {current_time}...")
         market_inputs = MarketInputs()
         market_inputs._now_dt = datetime.datetime.fromtimestamp(
             current_time
@@ -103,40 +118,64 @@ class Controller:
         market_inputs.step_size = 900
         self.market.inputs = market_inputs
 
-        self.initiate_electricity_ask_auction(current_time)
-
+        # insert new acution into market
+        self.market.receive_auction(
+            initiate_electricity_ask_auction(current_time, tender_amount=10)
+        )
         self.market.step()
 
-    def initiate_electricity_ask_auction(self, current_time):
-        # Create AuctionParameters object
-        auction_parameters = AuctionParameters(
-            product_type="electricity",
-            gate_opening_time=current_time,
-            gate_closure_time=current_time
-            + datetime.timedelta(hours=1).total_seconds(),
-            supply_start_time=current_time
-            + datetime.timedelta(hours=1, minutes=15).total_seconds(),
-            supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
-            tender_amount_kw=10,  # TODO adjust tender amount
+    def step_units(self, current_time):
+        print(f"Step Units {current_time}...")
+
+        market_results = self.market.get_current_auction_results()
+        accounter = None
+        accounter = Accounter(
+            auction_result=market_results.get(f"{current_time}_electricity", None)
         )
-        # Create a new auction
-        new_auction = ElectricityAskAuction(
-            params=auction_parameters, current_time=current_time
-        )
-        self.market.receive_auction(new_auction)
+
+        for actor_id in self.unit_pool.actor_to_root.keys():
+            # retrieve setpoint from awarded orders
+            setpoint = accounter.return_awarded_sum(actor_id)
+
+            # step actor
+            actor_result = self.unit_pool.step_actor(
+                uuid=actor_id,
+                input=UnitInput(
+                    delta_t=900,
+                    p_kw=setpoint,
+                    q_kvar=0,
+                ),
+                step=current_time // 900,
+                other_inputs=[],
+            )
+            print(f"Stepped units of actor {actor_id}... {actor_result}")
+
+            payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
+            # store transaction in account
+            self.actor_accounts[actor_id].add_transaction(
+                awarded_amount=setpoint, provided_power=actor_result.p_kw, payoff=payoff
+            )
+            print(f"Payoff for actor {actor_id}... {payoff}")
+
+    async def check_step_done(self):
+        if not self.current_task.done():
+            await self.current_task
 
     async def register_agent(self, participant_id: str) -> List[UnitInformation]:
         await self.check_step_done()
+        print(f"Registering agent {participant_id}...")
 
         if participant_id in self.config.participants:
             if participant_id in self.registered:
                 raise ControlException(400, "The participant is already registered!")
             self.registered.add(participant_id)
+            print(f"Registered agent {participant_id}...")
         else:
             raise ControlException(403, "The requester is unknown!")
 
         actor_id, root_unit = allocate_default_actor_units()
         self.unit_pool.insert_actor_root(actor_id, root_unit)
+        self.actor_accounts[actor_id] = Account()
         return actor_id, self.unit_pool.read_units(actor_id)
 
     async def read_units(self, actor_id) -> List[UnitInformation]:
@@ -163,7 +202,6 @@ class Controller:
             agent=agent,
             supply_time=supply_time,
             product_type="electricity",
-            auction_id=order.auction_id,
         ):
             return True
         else:
@@ -178,7 +216,7 @@ class Controller:
         current_results = self.market.get_current_auction_results()
         relevant_results = {}
         # filter results for agent
-        for auction_result in current_results:
+        for auction_result in current_results.values():
             relevant_results[auction_result.params.supply_start_time] = {
                 "order": [
                     awarded_order
@@ -194,10 +232,7 @@ class Controller:
         Returns current auction results based on product type and supply time
         """
         await self.check_step_done()
-        return {
-            f"{result.params.supply_start_time}_{result.params.product_type}": result
-            for result in self.market.get_current_auction_results()
-        }
+        return self.market.get_current_auction_results()
 
     def reset(self):
         self.market.reset()

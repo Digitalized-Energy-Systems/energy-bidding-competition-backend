@@ -117,7 +117,7 @@ def test_order_placed():
             assert len(market.auctions[auction["id"]].order_container.orders) == 3
         
         # auction results sum of awarded amounts
-        auction_results = market.get_current_auction_results()
+        auction_results = [result for result in market.get_current_auction_results().values()]
         print(auction_results)
         if  len(auction_results) == 1:
             2 == [sum([order.awarded_amount_kw for order in result.awarded_orders]) for result in auction_results]

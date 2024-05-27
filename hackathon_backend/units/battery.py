@@ -27,6 +27,7 @@ class MidasBatteryUnit(BatteryUnit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
+        print(f'Step Battery {self.id} with input {input} and step {step}')
         self._midas_battery.set_q_kvar(input.q_kvar)
         self._midas_battery.set_p_kw(input.p_kw)
         self._midas_battery.set_step_size(input.delta_t)
@@ -48,9 +49,9 @@ class MidasBatteryUnit(BatteryUnit):
 
 def create_battery(
     id,
-    cap_kwh=5,
-    p_charge_max_kw=1,
-    p_discharge_max_kw=1,
+    cap_kwh=10,
+    p_charge_max_kw=2,
+    p_discharge_max_kw=2,
     soc_min_percent=0,
     initial_soc=50,
 ):

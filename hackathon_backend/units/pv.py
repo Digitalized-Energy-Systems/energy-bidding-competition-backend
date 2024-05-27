@@ -4,8 +4,8 @@ from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
 import datetime
 
-# TODO PROFILE
-DEFAULT_PV_PROFILE = [10 for _ in range(96)]
+# TODO PROFILE, typically between 0 and 1000 in Germany (w_per_m2)?
+DEFAULT_PV_PROFILE = [1000 for _ in range(96)]
 DEFAULT_CONST_TEMP = 20
 
 
@@ -27,8 +27,9 @@ class MidasPVUnit(Unit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
+        print(f'Step PV {self.id} with input {input} and step {step}')
+        self._midas_pp.set_p_kw(DEFAULT_PV_PROFILE[step]) # TODO insert power value
         self._midas_pp.set_q_kvar(input.q_kvar)
-        self._midas_pp.set_p_kw(input.p_kw)
         self._midas_pp.set_step_size(input.delta_t)
         self._midas_pp.inputs.bh_w_per_m2 = self._profile[step]
         self._midas_pp.inputs.dh_w_per_m2 = self._profile[step]

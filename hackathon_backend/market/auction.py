@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict
 from typing import List
+import datetime
 import uuid
 import logging
 
@@ -17,10 +18,10 @@ class AuctionParameters:
 
 @dataclass
 class Order:
-    auction_id: str
+    agent: str
     amount_kw: float
     price_ct: float
-    agent: str
+    auction_id: str
 
 @dataclass
 class AwardedOrder(Order):
@@ -158,3 +159,19 @@ class ElectricityAskAuction(Auction):
             "params": asdict(self.params),
             "status": self.status
         }
+
+def initiate_electricity_ask_auction(current_time, tender_amount=10):
+    # Create AuctionParameters object
+    auction_parameters = AuctionParameters(
+        product_type="electricity",
+        gate_opening_time=current_time,
+        gate_closure_time=current_time
+        + datetime.timedelta(hours=1).total_seconds(),
+        supply_start_time=current_time
+        + datetime.timedelta(hours=1, minutes=15).total_seconds(),
+        supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
+        tender_amount_kw=tender_amount,
+    )
+    # Create a new auction
+    return ElectricityAskAuction(
+        params=auction_parameters, current_time=current_time)
