@@ -67,7 +67,8 @@ async def test_accounting():  # setup_controller):
         print(open_auctions)
         placed_order = await controller.receive_order(
             actor_id,
-            Order(agent=actor_id, amount_kw=1, price_ct=1),
+            amount_kw=1,
+            price_ct=1,
             supply_time=open_auctions[-1]["supply_start_time"],
         )
         print(f"Order placed sucessfull: {placed_order}")
@@ -78,10 +79,10 @@ async def test_accounting():  # setup_controller):
         # check account before step
         current_time = await controller.get_current_time()
         print(f"Time: {current_time}")
-        if current_time >= 4 * 900:
+        if current_time >= 5 * 900:
             balance = controller.actor_accounts[actor_id].get_balance()
 
-        await asyncio.sleep(controller.config.rt_step_duration_s + 1)
+        await asyncio.sleep(controller.config.rt_step_duration_s)
 
         # check account after step
         if balance is not None:
