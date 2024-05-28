@@ -51,7 +51,7 @@ async def test_accounting():  # setup_controller):
     controller.config = load_config("tests/config.json")
     controller.init()
     # set up first agent
-    actor_id, units = await controller.register_agent("TestA")
+    actor_id, units = await controller.register_actor("TestA")
     balance = None
     # wait for registration time end
     await asyncio.sleep(

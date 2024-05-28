@@ -40,7 +40,7 @@ async def test_read_auctions(setup_controller):
         response = await ac.get("/market/auction/open")
     # THEN
     assert response.status_code == 200
-    assert response.json() == []
+    assert response.json()['auctions'] == []
 
     # GIVEN
     interface.controller.step_market(current_time=900)
@@ -50,7 +50,7 @@ async def test_read_auctions(setup_controller):
     # THEN
     assert response.status_code == 200
     print(response.json())
-    assert len(response.json()) == 1
+    assert len(response.json()['auctions']) == 1
 
     # GIVEN
     interface.controller.step_market(current_time=1800)
@@ -60,7 +60,7 @@ async def test_read_auctions(setup_controller):
     # THEN
     assert response.status_code == 200
     print(response.json())
-    assert len(response.json()) == 2
+    assert len(response.json()['auctions']) == 2
 
 
 @pytest.mark.anyio
@@ -85,7 +85,7 @@ async def test_register_actor(setup_controller):
         )
 
     # THEN
-    result = json.loads(response.json())
+    result = response.json()
     assert response.status_code == 200
     assert len(result["units"]) == 3
     assert result["units"][0]["unit_id"] == "d0"
@@ -117,14 +117,14 @@ async def test_read_information(setup_controller):
     assert response.status_code == 404
 
     # GIVEN
-    id, _ = await interface.controller.register_agent("TestA")
+    id, _ = await interface.controller.register_actor("TestA")
 
     # WHEN
     async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.get("/units/information", params={"actor_id": str(id)})
 
     # THEN
-    result = json.loads(response.json())
+    result = response.json()
     assert response.status_code == 200
     assert len(result["units"]) == 3
     assert result["units"][0]["unit_id"] == "d0"
@@ -143,14 +143,16 @@ async def test_simulation_loop(setup_controller):
         response = await ac.post(
             "/hackathon/register", params={"participant_id": "TestA"}
         )
-    register_result = json.loads(response.json())
+    register_result = response.json()
+    print(register_result)
     await asyncio.sleep(config.rt_step_duration_s + config.rt_step_init_delay_s + 1)
     async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.get("/market/auction/open")
     auction_result = response.json()
+    print(auction_result)
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.put(
-            "/market/order",
+        response = await ac.post(
+            "/market/auction/order",
             params={
                 "actor_id": register_result["actor_id"],
                 "amount_kw": 10,

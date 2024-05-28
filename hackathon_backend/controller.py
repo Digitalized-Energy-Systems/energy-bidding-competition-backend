@@ -49,9 +49,9 @@ def load_default_config() -> Config:
 class Controller:
     """
     Needed functionality:
-    - agent management
-      - accept agent registration
-      - store agent identifiers
+    - actor management
+      - accept actor registration
+      - store actor identifiers
     - unit management
       - [...]
     - loop over time
@@ -64,7 +64,7 @@ class Controller:
       - return error in case of invalid order
     - return open auctions from market
     - return auction results from market
-      - filter according to asking agent
+      - filter according to asking actor/agent
       - return full results for gui
     """
 
@@ -162,15 +162,15 @@ class Controller:
         if not self.current_task.done():
             await self.current_task
 
-    async def register_agent(self, participant_id: str) -> List[UnitInformation]:
+    async def register_actor(self, participant_id: str) -> List[UnitInformation]:
         await self.check_step_done()
-        print(f"Registering agent {participant_id}...")
+        print(f"Registering actor {participant_id}...")
 
         if participant_id in self.config.participants:
             if participant_id in self.registered:
                 raise ControlException(400, "The participant is already registered!")
             self.registered.add(participant_id)
-            print(f"Registered agent {participant_id}...")
+            print(f"Registered actor {participant_id}...")
         else:
             raise ControlException(403, "The requester is unknown!")
 
@@ -187,13 +187,13 @@ class Controller:
         return self.unit_pool.read_units(actor_id)
 
     async def return_open_auction_params(self):
-        """Return open auction params to enable agents to place orders."""
+        """Return open auction params to enable actors to place orders."""
         await self.check_step_done()
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
-    async def receive_order(self, agent, amount_kw, price_ct, supply_time):
-        """Receive order from agent and pass it to market.
-        :param agent: Agent identifier
+    async def receive_order(self, actor_id, amount_kw, price_ct, supply_time):
+        """Receive order from actor and pass it to market.
+        :param actor_id: Actor identifier
         :param order: Order object
         :param supply_time: Supply time of the auction (key to select auction)
         """
@@ -202,7 +202,7 @@ class Controller:
         if self.market.receive_order(
             amount_kw=amount_kw,
             price_ct=price_ct,
-            agent=agent,
+            agent=actor_id,
             supply_time=supply_time,
             product_type="electricity",
         ):
@@ -210,24 +210,26 @@ class Controller:
         else:
             raise ControlException(404, "The specified auction does not exist!")
 
-    async def return_awarded_orders(self, agent):
-        """Return awarded orders for agent.
-        :param agent: Agent identifier
+    async def return_awarded_orders(self, actor_id):
+        """Return awarded orders for actor.
+        :param actor_id: Actor identifier
         """
         await self.check_step_done()
 
         current_results = self.market.get_current_auction_results()
         relevant_results = {}
-        # filter results for agent
+        # filter results for actor/agent
         for auction_result in current_results.values():
             relevant_results[auction_result.params.supply_start_time] = {
                 "order": [
                     awarded_order
                     for awarded_order in auction_result.awarded_orders
-                    if awarded_order.agent == agent
+                    if awarded_order.agent == actor_id
                 ],
                 "clearing_price": auction_result.clearing_price,
             }
+            # TODO Each "order" contains an "auction_id", which the actors 
+            # do not need to receive
         return relevant_results
 
     async def get_current_auction_results(self):

@@ -4,7 +4,7 @@
         "PlaceholderB",
         "PlaceholderC"
     ],
-    "rt_step_duration_s": 360,
-    "rt_step_init_delay_s": 720,
+    "rt_step_duration_s": 20,
+    "rt_step_init_delay_s": 20,
     "pause": false
 }

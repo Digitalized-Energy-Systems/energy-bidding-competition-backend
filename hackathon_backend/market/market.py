@@ -26,6 +26,7 @@ class Market:
     def create_empty_attributes(self):
         self.auctions = {}
         self.open_auctions = []
+        self.current_auction_results = []
         self.expired_auctions = {}
 
     def step(self):

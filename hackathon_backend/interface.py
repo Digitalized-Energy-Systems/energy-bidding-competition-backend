@@ -21,15 +21,13 @@ async def read_root():
 @router.post("/hackathon/register/")
 async def register_actor(participant_id: str):
     try:
-        actor_id, unit_information_list = await controller.register_agent(
+        actor_id, unit_information_list = await controller.register_actor(
             participant_id
         )
-        return json.dumps(
-            {
+        return {
                 "units": [ui.__dict__ for ui in unit_information_list],
                 "actor_id": str(actor_id),
-            }
-        )
+        }
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 
@@ -39,11 +37,9 @@ async def register_actor(participant_id: str):
 async def read_unit_information(actor_id: str):
     try:
         unit_information_list = await controller.read_units(UUID(actor_id))
-        return json.dumps(
-            {
+        return {
                 "units": [ui.__dict__ for ui in unit_information_list],
-            }
-        )
+        }
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 
@@ -51,14 +47,14 @@ async def read_unit_information(actor_id: str):
 @router.get("/market/auction/open")
 @router.get("/market/auction/open/")
 async def read_auctions():
-    # try:
-    return {"auctions": await controller.return_open_auction_params()}
-    # except ControlException as e:
-    #     raise HTTPException(e.code, e.message)
+    try:
+        return {"auctions": await controller.return_open_auction_params()}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
 
 
-@router.put("/market/order")
-@router.put("/market/order/")
+@router.post("/market/auction/order")
+@router.post("/market/auction/order/")
 async def place_order(
     actor_id: str, amount_kw: float, price_ct: float, supply_time: int
 ):
