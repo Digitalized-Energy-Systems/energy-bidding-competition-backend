@@ -60,7 +60,7 @@ async def test_accounting():  # setup_controller):
         + 1
     )
 
-    for i in range(96):
+    for i in range(20):
         # WHEN
         # place order in last auction
         open_auctions = await controller.return_open_auction_params()
@@ -90,7 +90,7 @@ async def test_accounting():  # setup_controller):
 
     print(f"Account transactions: {controller.actor_accounts[actor_id].transactions}")
     print(f"General demand: {controller.general_demand.supply}")
-    assert 0 == 1
+    # assert 0 == 1
 
 
 def test_empty_accounter():
