@@ -14,7 +14,7 @@ from hackathon_backend.accounting.accounter import (
     ElectricityAskAuctionAccounter as Accounter,
 )
 from hackathon_backend.accounting.account import Account
-
+from hackathon_backend.general_demand import GeneralDemand, create_general_demand
 
 DEFAULT_CONFIG_FILE = "config.json"
 
@@ -77,12 +77,14 @@ class Controller:
         self.config = load_default_config() if config is None else config
         self.step = 0
         self.actor_accounts = {}
+        self.general_demand = None
 
     def init(self):
         self._main_loop = asyncio.create_task(self.initiate_stepping())
 
     async def initiate_stepping(self):
         await asyncio.sleep(self.config.rt_step_init_delay_s)
+        self.general_demand = create_general_demand(len(self.actor_accounts))
 
         while True:
             while self.config.pause:
@@ -116,12 +118,14 @@ class Controller:
         market_inputs._now_dt = datetime.datetime.fromtimestamp(
             current_time
         )  # TODO insert correct time
-        market_inputs.step_size = 900
+        step_size = 900
+        market_inputs.step_size = step_size
         self.market.inputs = market_inputs
-
+        
+        tender_amount = self.general_demand.step(None, current_time//step_size).p_kw
         # insert new acution into market
         self.market.receive_auction(
-            initiate_electricity_ask_auction(current_time, tender_amount=10)
+            initiate_electricity_ask_auction(current_time, tender_amount=tender_amount)
         )
         self.market.step()
 
@@ -129,10 +133,17 @@ class Controller:
         print(f"Step Units {current_time}...")
 
         market_results = self.market.get_current_auction_results()
-        accounter = None
+        auction_result = market_results.get(f"{current_time}_electricity", None)
+        # accounter = None
         accounter = Accounter(
-            auction_result=market_results.get(f"{current_time}_electricity", None)
+            auction_result=auction_result
         )
+        # retrieve tender_amount
+        if auction_result is not None:
+            tender_amount_kw = auction_result.params.tender_amount_kw
+        else:
+            tender_amount_kw = 0
+        provided_amount_kw = 0
 
         for actor_id in self.unit_pool.actor_to_root.keys():
             # retrieve setpoint from awarded orders
@@ -157,6 +168,14 @@ class Controller:
                 awarded_amount=setpoint, provided_power=actor_result.p_kw, payoff=payoff
             )
             print(f"Payoff for actor {actor_id}... {payoff}")
+            
+            # store provided amount if bid was awarded
+            if setpoint > 0:
+                provided_amount_kw += actor_result.p_kw
+        self.general_demand.notify_supply(
+            tender_amount_kw=tender_amount_kw, 
+            provided_amount_kw=provided_amount_kw
+        )
 
     async def check_step_done(self):
         if not self.current_task.done():
