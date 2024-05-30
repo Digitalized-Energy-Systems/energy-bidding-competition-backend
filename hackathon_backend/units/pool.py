@@ -1,5 +1,6 @@
 from uuid import UUID, uuid4
 from typing import Dict, List
+import math
 from .unit import Unit, UnitInput, UnitInformation
 from .vpp import VPP, VPPInformation
 from .load import create_demand
@@ -52,14 +53,21 @@ class UnitPool:
         return _flatten_unit_information(unit_information)
 
 
-def allocate_default_actor_units(demand_size=4):
-    # TODO full generation of units
-    # TODO specify pv profile
+def allocate_default_actor_units(demand_size=1):
     new_actor_id = uuid4()
     root_vpp = VPP()
+    # Load
     p_profile_day = [demand_size for _ in range(96)]
-    q_profile_day = [demand_size + 1 for _ in range(96)]
+    q_profile_day = [demand_size/2 for _ in range(96)]
     root_vpp.add_unit(create_demand("d0", p_profile_day, q_profile_day, 1))
-    root_vpp.add_unit(create_pv_unit("pb0"))
+    #PV
+    # full cosine profile over N time intervals
+    n_intervals = 96
+    cos_values = [math.cos(2*math.pi*x/n_intervals) for x in range(n_intervals)]
+    # create irradiance profile from cosine values
+    pv_profile_day = [1000*(1-s)/2 for s in cos_values]
+    p_pv_peak = 3.0
+    root_vpp.add_unit(create_pv_unit("pb0", pv_profile_day, a_m2=4*p_pv_peak, eta_percent=25))
+    # Battery
     root_vpp.add_unit(create_battery("b0"))
     return new_actor_id, root_vpp

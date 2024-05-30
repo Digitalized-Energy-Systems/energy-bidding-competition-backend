@@ -28,11 +28,11 @@ class SimpleDemand:
 
 class SimpleDemandUnit(Unit):
 
-    def __init__(self, id, simple_demand: SimpleDemand) -> None:
+    def __init__(self, id, simple_demand: SimpleDemand, forecast_horizon = 8) -> None:
         super().__init__(id)
 
         self._simple_demand = simple_demand
-        self.forecast_horizon = 4
+        self.forecast_horizon = forecast_horizon
         self.time_step = 0  # None
 
     def step(
@@ -45,7 +45,7 @@ class SimpleDemandUnit(Unit):
 
     def read_information(self) -> DemandInformation:
         p, q = self.get_forecast(
-            start_index=self.time_step + 1,
+            start_index=self.time_step,
             end_index=self.time_step + 1 + self.forecast_horizon,
         )
         return DemandInformation(self.id, p, q)
