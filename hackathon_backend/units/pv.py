@@ -27,6 +27,7 @@ class MidasPVUnit(Unit):
         self._midas_pp = midas_pp
         self._profile = pv_profile
         self.forecast_horizon = forecast_horizon
+        self.time_step = 0
 
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
