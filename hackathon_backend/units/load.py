@@ -2,6 +2,8 @@ from typing import List, Dict
 from dataclasses import dataclass
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 
+N_TIME_INTERVALS = 96
+DEFAULT_LOAD_PROFILE = [5 for _ in range(N_TIME_INTERVALS)]
 
 @dataclass
 class DemandInformation(UnitInformation):
@@ -65,6 +67,10 @@ class SimpleDemandUnit(Unit):
         return p_forecast, q_forecast
 
 
-def create_demand(id, p_profile: List, q_profile: List, uncertainty: float):
-    # TODO Default Profile
+def create_demand(
+    id,
+    p_profile: List=DEFAULT_LOAD_PROFILE,
+    q_profile: List=DEFAULT_LOAD_PROFILE,
+    uncertainty: float=1.0
+):
     return SimpleDemandUnit(id, SimpleDemand(p_profile, q_profile, uncertainty))

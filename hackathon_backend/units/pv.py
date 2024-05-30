@@ -63,6 +63,7 @@ class MidasPVUnit(Unit):
         # limit indices
         start_index = min(start_index, len(self._profile))
         end_index = min(end_index, len(self._profile))
+        
         p_forecast = []
         for step in range(start_index, end_index):
             result = self.get_pv_power(UnitInput(step_size, None, None), step)
