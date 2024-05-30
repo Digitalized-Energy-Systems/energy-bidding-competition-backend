@@ -17,6 +17,7 @@ class SimpleDemand:
     def __init__(
         self, p_demand_kw: List[float], q_demand_kvar: List[float], uncertainty: float
     ) -> None:
+        assert len(p_demand_kw) == len(q_demand_kvar)
         self._perfect_demand_p_kw = p_demand_kw
         self._perfect_demand_p_kvar = q_demand_kvar
         self._uncertainty = uncertainty
@@ -51,11 +52,14 @@ class SimpleDemandUnit(Unit):
         return DemandInformation(self.id, p, q)
 
     def get_forecast(self, start_index, end_index):
-        # TODO specify time frame of forecast
+        # limit indices
+        start_index = min(start_index, len(self._simple_demand._perfect_demand_p_kw))
+        end_index = min(end_index, len(self._simple_demand._perfect_demand_p_kw))
+        
         p_forecast = []
         q_forecast = []
-        for i in range(start_index, end_index):
-            p_fcast, q_fcast = self._simple_demand.forecast_demand(i)
+        for index in range(start_index, end_index):
+            p_fcast, q_fcast = self._simple_demand.forecast_demand(index)
             p_forecast.append(p_fcast)
             q_forecast.append(q_fcast)
         return p_forecast, q_forecast

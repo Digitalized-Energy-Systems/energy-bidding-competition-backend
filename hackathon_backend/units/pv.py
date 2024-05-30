@@ -20,17 +20,23 @@ class PVInformation(UnitInformation):
 class MidasPVUnit(Unit):
 
     def __init__(
-        self, id, midas_pp: PhotovoltaicPowerPlant, pv_profile: List[float]
+        self, id, midas_pp: PhotovoltaicPowerPlant, pv_profile: List[float], forecast_horizon = 8
     ) -> None:
         super().__init__(id)
 
         self._midas_pp = midas_pp
         self._profile = pv_profile
+        self.forecast_horizon = forecast_horizon
 
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
         print(f"Step PV {self.id} with input {input} and step {step}")
+        self.time_step = step
+        return self.get_pv_power(input, step)
+    
+    def get_pv_power(self, input: UnitInput, step: int):
+        # step midas model
         self._midas_pp.set_p_kw(input.p_kw) # not needed for pvsim (only for pvsystemsim)
         self._midas_pp.set_q_kvar(input.q_kvar) # not needed for pvsim (only for pvsystemsim)
         self._midas_pp.set_step_size(input.delta_t)
@@ -48,8 +54,21 @@ class MidasPVUnit(Unit):
         )
 
     def read_information(self) -> UnitInformation:
-        return PVInformation(self.id, DEFAULT_PV_PROFILE)
-
+        return PVInformation(self.id, self.get_forecast(
+            start_index=self.time_step,
+            end_index=self.time_step + 1 + self.forecast_horizon,
+        ))
+    
+    def get_forecast(self, start_index, end_index, step_size=15*60):
+        # limit indices
+        start_index = min(start_index, len(self._profile))
+        end_index = min(end_index, len(self._profile))
+        p_forecast = []
+        for step in range(start_index, end_index):
+            result = self.get_pv_power(UnitInput(step_size, None, None), step)
+            p_forecast.append(result.p_kw)
+            
+        return p_forecast
 
 def create_pv_unit(
     id, 
