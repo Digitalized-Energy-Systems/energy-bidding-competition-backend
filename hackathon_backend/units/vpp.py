@@ -72,7 +72,7 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
                 q_kvar=remaining_request.q_kvar + result.q_kvar,
             )
 
-        return UnitResult(p_kw=p_kw_sum + input.p_kw, q_kvar=q_kvar_sum + input.q_kvar)
+        return UnitResult(p_kw=-p_kw_sum, q_kvar=-q_kvar_sum)
 
 
 @dataclass
