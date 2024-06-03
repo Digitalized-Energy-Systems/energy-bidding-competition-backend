@@ -24,14 +24,14 @@ class UnitPool:
     They belong to actors identified by UUIDs and their information is
     returned as a list of unit information."""
 
-    actor_to_root: Dict[UUID, Unit]
+    actor_to_root: Dict[str, Unit]
 
     def __init__(self) -> None:
         self.actor_to_root = {}
 
     def step_actor(
         self,
-        uuid: UUID,
+        uuid: str,
         input: UnitInput,
         step: int,
         other_inputs: Dict[str, UnitInput] = None,
@@ -39,13 +39,13 @@ class UnitPool:
         print(f"Step actor {uuid}...")
         return self.actor_to_root[uuid].step(input, step, other_inputs=other_inputs)
 
-    def insert_actor_root(self, actor: UUID, unit_root: Unit):
+    def insert_actor_root(self, actor: str, unit_root: Unit):
         self.actor_to_root[actor] = unit_root
 
-    def has_actor(self, actor_id: UUID):
+    def has_actor(self, actor_id: str):
         return actor_id in self.actor_to_root
 
-    def read_units(self, actor: UUID) -> List[UnitInformation]:
+    def read_units(self, actor: str) -> List[UnitInformation]:
         """Initiate reading of unit information and flatten it."""
         root = self.actor_to_root[actor]
         unit_information = root.read_information()
@@ -62,4 +62,4 @@ def allocate_default_actor_units(demand_size=4):
     root_vpp.add_unit(create_demand("d0", p_profile_day, q_profile_day, 1))
     root_vpp.add_unit(create_pv_unit("pb0"))
     root_vpp.add_unit(create_battery("b0"))
-    return new_actor_id, root_vpp
+    return str(new_actor_id), root_vpp

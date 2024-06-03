@@ -1,5 +1,4 @@
 from typing import List, Dict
-from dataclasses import dataclass
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
 import datetime
@@ -9,20 +8,32 @@ DEFAULT_PV_PROFILE = [1000 for _ in range(96)]
 DEFAULT_CONST_TEMP = 20
 
 
-@dataclass
 class PVInformation(UnitInformation):
+    pv_p_kw: List[float]
+    a_m2: float
+    eta_percent: float
+    t_module_deg_celsius: float
+
+
+class PVForecastInformation(UnitInformation):
     forecast_pv_p_kw: List[float]
 
 
 class MidasPVUnit(Unit):
 
-    def __init__(
-        self, id, midas_pp: PhotovoltaicPowerPlant, pv_profile: List[float]
-    ) -> None:
-        super().__init__(id)
+    def __init__(self, pv_information: PVInformation) -> None:
+        super().__init__(pv_information.unit_id)
 
-        self._midas_pp = midas_pp
-        self._profile = pv_profile
+        self._midas_pp = PhotovoltaicPowerPlant(
+            {
+                "a_m2": pv_information.a_m2,
+                "eta_percent": pv_information.eta_percent,
+                "is_static_t_module": True,
+            },
+            {"t_module_deg_celsius": pv_information.t_module_deg_celsius},
+        )
+        self._internal_information = pv_information
+        self._profile = pv_information.pv_p_kw
 
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
@@ -44,15 +55,21 @@ class MidasPVUnit(Unit):
         )
 
     def read_information(self) -> UnitInformation:
-        return PVInformation(self.id, DEFAULT_PV_PROFILE)
+        return PVForecastInformation(
+            unit_id=self.id, forecast_pv_p_kw=DEFAULT_PV_PROFILE
+        )
+
+    def read_full_information(self) -> UnitInformation:
+        return self._internal_information
 
 
 def create_pv_unit(id, a_m2=15, eta_percent=25, t_module_deg_celsius=25):
     return MidasPVUnit(
-        id,
-        PhotovoltaicPowerPlant(
-            {"a_m2": a_m2, "eta_percent": eta_percent, "is_static_t_module": True},
-            {"t_module_deg_celsius": t_module_deg_celsius},
+        PVInformation(
+            unit_id=id,
+            pv_p_kw=DEFAULT_PV_PROFILE,
+            a_m2=a_m2,
+            eta_percent=eta_percent,
+            t_module_deg_celsius=t_module_deg_celsius,
         ),
-        pv_profile=DEFAULT_PV_PROFILE,
     )
