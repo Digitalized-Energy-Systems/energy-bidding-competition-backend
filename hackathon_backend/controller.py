@@ -1,6 +1,8 @@
 import asyncio
-import time, datetime, json
+import traceback
+import time, datetime
 from typing import List
+from pydantic.dataclasses import dataclass
 from .units.pool import UnitPool, allocate_default_actor_units
 from .units.unit import UnitInput
 from .market.market import Market, MarketInputs
@@ -14,10 +16,14 @@ from hackathon_backend.accounting.accounter import (
     ElectricityAskAuctionAccounter as Accounter,
 )
 from hackathon_backend.accounting.account import Account
-from hackathon_backend.general_demand import GeneralDemand, create_general_demand
+from hackathon_backend.general_demand import create_general_demand
 
-DEFAULT_CONFIG_FILE = "config.json"
-SECONDS_PER_STEP = 900
+from hackathon_backend.accounting.account import (
+    Account,
+)
+from hackathon_backend.config import Config, load_default_config
+
+SIMULATION_TIME_SECONDS_PER_STEP = 900
 
 
 class ControlException(Exception):
@@ -26,25 +32,6 @@ class ControlException(Exception):
 
         self.code = code
         self.message = message
-
-
-class Config:
-    participants: List[str]
-    rt_step_duration_s: float
-    rt_step_init_delay_s: float
-    pause: bool
-
-    def __init__(self, payload) -> None:
-        self.__dict__ = payload
-
-
-def load_config(config_file) -> Config:
-    with open(config_file) as f:
-        return Config(json.load(f))
-
-
-def load_default_config() -> Config:
-    return load_config(DEFAULT_CONFIG_FILE)
 
 
 class Controller:
@@ -82,35 +69,64 @@ class Controller:
         self.step = 0
         self.actor_accounts = {}
         self.general_demand = None
+        self.after_step_hooks = []
 
     def init(self):
+        print(f"Init controller...")
         self._main_loop = asyncio.create_task(self.initiate_stepping())
 
+    def add_after_step_hook(self, hook):
+        self.after_step_hooks.append(hook)
+
     async def initiate_stepping(self):
-        await asyncio.sleep(self.config.rt_step_init_delay_s)
-        self.general_demand = create_general_demand(len(self.actor_accounts))
+        try:
+            await asyncio.sleep(self.config.rt_step_init_delay_s)
+            print(f"Delay finished, starting the loop...")
+            self.general_demand = create_general_demand("gd0")
 
-        while True:
-            while self.config.pause:
-                asyncio.sleep(1)
-            self.registration_open = False
+            while True:
+                while self.config.pause:
+                    asyncio.sleep(1)
+                self.registration_open = False
 
-            self.current_market_task = asyncio.create_task(self.loop_market(self.step))
-            await asyncio.sleep(self.config.rt_step_duration_s)
-            self.current_unit_task = asyncio.create_task(self.loop_units(self.step))
-            print(f"Step finished...{self.step}")
-            self.step += 1
+                print(f"Starting market task...{self.step}")
+                self.current_market_task = asyncio.create_task(
+                    self.loop_market(self.step)
+                )
+                await asyncio.sleep(self.config.rt_step_duration_s)
+                self.current_unit_task = asyncio.create_task(self.loop_units(self.step))
+                print(f"Step finished...{self.step}")
+                self.step += 1
+
+                for hook in self.after_step_hooks:
+                    hook(self)
+        except Exception as e:
+            print("The main loop crashed!")
+            print(e)
+            traceback.print_exc()
 
     async def loop_market(self, time_step):
-        self.step_market(current_time=time_step * SECONDS_PER_STEP)
-        
+        try:
+            self.step_market(current_time=time_step * SIMULATION_TIME_SECONDS_PER_STEP)
+            print(f"Market stepped...{self.step}")
+        except Exception as e:
+            print(f"The market-step {time_step} crashed!")
+            print(e)
+            traceback.print_exc()
+
     async def loop_units(self, time_step):
-        self.step_units(current_time=time_step * SECONDS_PER_STEP)
+        try:
+            self.step_units(current_time=time_step * SIMULATION_TIME_SECONDS_PER_STEP)
+            print(f"Units stepped...{self.step}")
+        except Exception as e:
+            print(f"The unit-step {time_step} crashed!")
+            print(e)
+            traceback.print_exc()
 
     async def get_current_time(self):  # only for testing
         await self.check_market_step_done()
         await self.check_unit_step_done()
-        return self.step * SECONDS_PER_STEP
+        return self.step * SIMULATION_TIME_SECONDS_PER_STEP
 
     def step_market(self, current_time):
         """Step market to next time interval.
@@ -124,8 +140,8 @@ class Controller:
         step_size = 900
         market_inputs.step_size = step_size
         self.market.inputs = market_inputs
-        
-        tender_amount = self.general_demand.step(None, current_time//step_size).p_kw
+
+        tender_amount = self.general_demand.step(None, current_time // step_size).p_kw
         # insert new acution into market
         self.market.receive_auction(
             initiate_electricity_ask_auction(current_time, tender_amount=tender_amount)
@@ -138,9 +154,7 @@ class Controller:
         market_results = self.market.get_current_auction_results()
         auction_result = market_results.get(f"{current_time}_electricity", None)
         # accounter = None
-        accounter = Accounter(
-            auction_result=auction_result
-        )
+        accounter = Accounter(auction_result=auction_result)
         # retrieve tender_amount
         if auction_result is not None:
             tender_amount_kw = auction_result.params.tender_amount_kw
@@ -171,13 +185,12 @@ class Controller:
                 awarded_amount=setpoint, provided_power=actor_result.p_kw, payoff=payoff
             )
             print(f"Payoff for actor {actor_id}... {payoff}")
-            
+
             # store provided amount if bid was awarded
             if setpoint > 0:
                 provided_amount_kw += actor_result.p_kw
         self.general_demand.notify_supply(
-            tender_amount_kw=tender_amount_kw, 
-            provided_amount_kw=provided_amount_kw
+            tender_amount_kw=tender_amount_kw, provided_amount_kw=provided_amount_kw
         )
 
     async def check_market_step_done(self):
@@ -194,7 +207,9 @@ class Controller:
 
             if participant_id in self.config.participants:
                 if participant_id in self.registered:
-                    raise ControlException(400, "The participant is already registered!")
+                    raise ControlException(
+                        400, "The participant is already registered!"
+                    )
                 self.registered.add(participant_id)
                 print(f"Registered actor {participant_id}...")
             else:
@@ -256,7 +271,7 @@ class Controller:
                 ],
                 "clearing_price": auction_result.clearing_price,
             }
-            # TODO Each "order" contains an "auction_id", which the actors 
+            # TODO Each "order" contains an "auction_id", which the actors
             # do not need to receive
         return relevant_results
 

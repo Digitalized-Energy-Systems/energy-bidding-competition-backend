@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Dict
+from pydantic import BaseModel
 from dataclasses import dataclass
 
 
-@dataclass
-class UnitInformation:
+class UnitInformation(BaseModel):
     unit_id: str
 
 
@@ -37,4 +37,8 @@ class Unit(ABC):
 
     @abstractmethod
     def read_information(self) -> UnitInformation:
+        return None
+
+    @abstractmethod
+    def read_full_information(self) -> UnitInformation:
         return None

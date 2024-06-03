@@ -10,7 +10,8 @@ import asyncio, anyio
 from dataclasses import dataclass
 from hackathon_backend.market.market import *
 from hackathon_backend.market.auction import *
-from hackathon_backend.controller import Controller, load_config
+from hackathon_backend.controller import Controller
+from hackathon_backend.config import load_config
 from hackathon_backend.accounting.accounter import (
     ElectricityAskAuctionAccounter as Accounter,
 )

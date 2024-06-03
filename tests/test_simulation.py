@@ -3,12 +3,14 @@ from httpx import AsyncClient
 from fastapi import FastAPI
 import pytest
 from hackathon_backend.main import lifespan
-from hackathon_backend.controller import load_config
+from hackathon_backend.config import load_config
 import hackathon_backend.interface as interface
+
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
 
 @pytest.fixture
 async def setup_controller():
@@ -20,6 +22,7 @@ async def setup_controller():
 
     # teardown code
     interface.controller.reset()
+
 
 @pytest.mark.anyio
 async def test_simulation_loop(setup_controller):

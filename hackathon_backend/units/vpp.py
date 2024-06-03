@@ -1,13 +1,12 @@
-from copy import copy
 from abc import abstractmethod, ABC
 from typing import List, Dict
-from dataclasses import dataclass
 
 from hackathon_backend.units.unit import UnitInformation
 from .unit import Unit, UnitInput, UnitResult
 from .battery import BatteryUnit
 
-VPP_ID = -1
+
+VPP_ID = "-1"
 
 
 class VPPStrategy(ABC):
@@ -75,7 +74,6 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
         return UnitResult(p_kw=-p_kw_sum, q_kvar=-q_kvar_sum)
 
 
-@dataclass
 class VPPInformation(UnitInformation):
     unit_information_list: List[UnitInformation]
 
@@ -117,5 +115,16 @@ class VPP(Unit):
 
     def read_information(self) -> VPPInformation:
         return VPPInformation(
-            self.id, [unit.read_information() for unit in self.sub_units.values()]
+            unit_id=self.id,
+            unit_information_list=[
+                unit.read_information() for unit in self.sub_units.values()
+            ],
+        )
+
+    def read_full_information(self) -> VPPInformation:
+        return VPPInformation(
+            unit_id=self.id,
+            unit_information_list=[
+                unit.read_full_information() for unit in self.sub_units.values()
+            ],
         )
