@@ -1,10 +1,14 @@
 from typing import List, Dict
-from dataclasses import dataclass
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 
 
-@dataclass
 class DemandInformation(UnitInformation):
+    perfect_demand_p_kw: List[float]
+    perfect_demand_q_kvar: List[float]
+    uncertainty: float
+
+
+class ForecastedDemandInformation(UnitInformation):
     forecast_demand_p_kw: List[float]
     forecast_demand_q_kvar: List[float]
 
@@ -28,10 +32,15 @@ class SimpleDemand:
 
 class SimpleDemandUnit(Unit):
 
-    def __init__(self, id, simple_demand: SimpleDemand) -> None:
-        super().__init__(id)
+    def __init__(self, demand_information: DemandInformation) -> None:
+        super().__init__(demand_information.unit_id)
 
-        self._simple_demand = simple_demand
+        self._simple_demand = SimpleDemand(
+            demand_information.perfect_demand_p_kw,
+            demand_information.perfect_demand_q_kvar,
+            demand_information.uncertainty,
+        )
+        self._internal_information = demand_information
         self.forecast_horizon = 4
         self.time_step = 0  # None
 
@@ -43,15 +52,19 @@ class SimpleDemandUnit(Unit):
         p, q = self._simple_demand.forecast_demand(step)
         return UnitResult(p_kw=p, q_kvar=q)
 
-    def read_information(self) -> DemandInformation:
+    def read_information(self) -> UnitInformation:
         p, q = self.get_forecast(
             start_index=self.time_step + 1,
             end_index=self.time_step + 1 + self.forecast_horizon,
         )
-        return DemandInformation(self.id, p, q)
+        return ForecastedDemandInformation(
+            unit_id=self.id, forecast_demand_p_kw=p, forecast_demand_q_kvar=q
+        )
+
+    def read_full_information(self) -> UnitInformation:
+        return self._internal_information
 
     def get_forecast(self, start_index, end_index):
-        # TODO specify time frame of forecast
         p_forecast = []
         q_forecast = []
         for i in range(start_index, end_index):
@@ -62,5 +75,11 @@ class SimpleDemandUnit(Unit):
 
 
 def create_demand(id, p_profile: List, q_profile: List, uncertainty: float):
-    # TODO Default Profile
-    return SimpleDemandUnit(id, SimpleDemand(p_profile, q_profile, uncertainty))
+    return SimpleDemandUnit(
+        DemandInformation(
+            unit_id=id,
+            perfect_demand_p_kw=p_profile,
+            perfect_demand_q_kvar=q_profile,
+            uncertainty=uncertainty,
+        )
+    )

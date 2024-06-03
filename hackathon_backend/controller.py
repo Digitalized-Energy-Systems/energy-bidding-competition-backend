@@ -1,6 +1,8 @@
 import asyncio
-import time, datetime, json
+import traceback
+import time, datetime
 from typing import List
+from pydantic.dataclasses import dataclass
 from .units.pool import UnitPool, allocate_default_actor_units
 from .units.unit import UnitInput
 from .market.market import Market, MarketInputs
@@ -13,10 +15,10 @@ from hackathon_backend.units.pool import (
 from hackathon_backend.accounting.accounter import (
     ElectricityAskAuctionAccounter as Accounter,
 )
-from hackathon_backend.accounting.account import Account
-
-
-DEFAULT_CONFIG_FILE = "config.json"
+from hackathon_backend.accounting.account import (
+    Account,
+)
+from hackathon_backend.config import Config, load_default_config
 
 
 class ControlException(Exception):
@@ -25,25 +27,6 @@ class ControlException(Exception):
 
         self.code = code
         self.message = message
-
-
-class Config:
-    participants: List[str]
-    rt_step_duration_s: float
-    rt_step_init_delay_s: float
-    pause: bool
-
-    def __init__(self, payload) -> None:
-        self.__dict__ = payload
-
-
-def load_config(config_file) -> Config:
-    with open(config_file) as f:
-        return Config(json.load(f))
-
-
-def load_default_config() -> Config:
-    return load_config(DEFAULT_CONFIG_FILE)
 
 
 class Controller:
@@ -77,9 +60,13 @@ class Controller:
         self.config = load_default_config() if config is None else config
         self.step = 0
         self.actor_accounts = {}
+        self.after_step_hooks = []
 
     def init(self):
         self._main_loop = asyncio.create_task(self.initiate_stepping())
+
+    def add_after_step_hook(self, hook):
+        self.after_step_hooks.append(hook)
 
     async def initiate_stepping(self):
         await asyncio.sleep(self.config.rt_step_init_delay_s)
@@ -92,16 +79,29 @@ class Controller:
             self.current_task = asyncio.create_task(self.loop(self.step))
             self.step += 1
 
+            try:
+                for hook in self.after_step_hooks:
+                    hook(self)
+            except Exception as e:
+                print("The main loop crashed!")
+                print(e)
+                traceback.print_exc()
+
     async def loop(self, time_step):
-        # TODO step 15 minutes ahead
-        current_time = time.time()
-        current_time = time_step * 900
+        try:
+            # TODO step 15 minutes ahead
+            current_time = time.time()
+            current_time = time_step * 900
 
-        self.current_time = current_time  # only for testing
+            self.current_time = current_time  # only for testing
 
-        self.step_market(current_time=current_time)
-        self.step_units(current_time=current_time)
-        print(f"Step finished...{current_time}")
+            self.step_market(current_time=current_time)
+            self.step_units(current_time=current_time)
+            print(f"Step finished...{current_time}")
+        except Exception as e:
+            print(f"The step {time_step} crashed!")
+            print(e)
+            traceback.print_exc()
 
     async def get_current_time(self):  # only for testing
         await self.check_step_done()
@@ -228,7 +228,7 @@ class Controller:
                 ],
                 "clearing_price": auction_result.clearing_price,
             }
-            # TODO Each "order" contains an "auction_id", which the actors 
+            # TODO Each "order" contains an "auction_id", which the actors
             # do not need to receive
         return relevant_results
 
