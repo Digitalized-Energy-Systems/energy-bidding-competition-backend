@@ -1,8 +1,12 @@
+import logging
 from typing import List, Dict
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 
 N_TIME_INTERVALS = 96
 DEFAULT_LOAD_PROFILE = [5 for _ in range(N_TIME_INTERVALS)]
+
+
+logger = logging.getLogger(__name__)
 
 
 class DemandInformation(UnitInformation):
@@ -53,7 +57,7 @@ class SimpleDemandUnit(Unit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
-        print(f"Step Load {self.id} with input {input} and step {step}")
+        logger.info("Step Load %s with input %s and step %s", self.id, input, step)
         self.time_step = step
         p, q = self._simple_demand.forecast_demand(step)
         return UnitResult(p_kw=p, q_kvar=q)

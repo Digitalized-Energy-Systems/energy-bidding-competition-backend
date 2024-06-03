@@ -1,5 +1,6 @@
 from abc import abstractmethod, ABC
 from typing import List, Dict
+import logging
 
 from hackathon_backend.units.unit import UnitInformation
 from .unit import Unit, UnitInput, UnitResult
@@ -7,6 +8,8 @@ from .battery import BatteryUnit
 
 
 VPP_ID = "-1"
+
+logger = logging.getLogger(__name__)
 
 
 class VPPStrategy(ABC):
@@ -42,7 +45,7 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
         # to deliver the remaining energy as best as possible
         for unit in [unit for unit in units if not isinstance(unit, BatteryUnit)]:
             result = unit.step(input, step)
-            print(f"Unit {unit.id} result: {result}")
+            logger.info("Unit %s result: %s", unit.id, result)
             p_kw_sum += result.p_kw
             q_kvar_sum += result.q_kvar
 
@@ -60,7 +63,7 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
                 ),
                 step,
             )
-            print(f"Unit {unit.id} result: {result}")
+            logger.info("Unit %s result: %s", unit.id, result)
             p_kw_sum += result.p_kw
             q_kvar_sum += result.q_kvar
 
@@ -94,7 +97,7 @@ class VPP(Unit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
-        print(f"Step VPP {self.id} with input {input} and step {step}")
+        logger.info("Step VPP %s with input %s and step %s", self.id, input, step)
         if self.strategy is None:
             # just step if no strategy shall be applied
             for sub_unit in self.sub_units.values():

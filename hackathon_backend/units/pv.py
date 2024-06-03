@@ -1,15 +1,16 @@
-import sys
 from typing import List, Dict
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
 import datetime
-import math
+import logging
 
 P_PV_PEAK = 3.0
 N_TIME_INTERVALS = 96
 # Profile typically between 0 and 1000 in Germany (w_per_m2):
 DEFAULT_PV_PROFILE = [1000 for _ in range(N_TIME_INTERVALS)]
 DEFAULT_CONST_TEMP = 20
+
+logger = logging.getLogger(__name__)
 
 
 class PVInformation(UnitInformation):
@@ -44,7 +45,7 @@ class MidasPVUnit(Unit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
-        print(f"Step PV {self.id} with input {input} and step {step}")
+        logger.info("Step PV %s with input %s and step %s", self.id, input, step)
         self.time_step = step
         return self.get_pv_power(input, step)
 
@@ -65,7 +66,6 @@ class MidasPVUnit(Unit):
         self._midas_pp.inputs.now_dt = datetime.datetime(
             2000, 1, 1, step // 4, (step * 15) % 60, 0, 0
         )
-        print(self._midas_pp.inputs.now_dt)
         self._midas_pp.step()
 
         return UnitResult(

@@ -1,6 +1,9 @@
 from typing import Dict
+import logging
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.buffer.batterysim.battery import Battery
+
+logger = logging.getLogger(__name__)
 
 
 class BatteryInformation(UnitInformation):
@@ -34,7 +37,7 @@ class MidasBatteryUnit(BatteryUnit):
     def step(
         self, input: UnitInput, step: int, other_inputs: Dict[str, UnitInput] = None
     ):
-        print(f"Step Battery {self.id} with input {input} and step {step}")
+        logger.info("Step Battery %s with input %s and step %s", self.id, input, step)
         self._midas_battery.set_q_kvar(input.q_kvar)
         self._midas_battery.set_p_kw(input.p_kw)
         self._midas_battery.set_step_size(input.delta_t)

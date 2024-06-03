@@ -5,3 +5,4 @@ __pycache__
 .coverage
 htmlcov/
 app_state.json
+dgh-backend.log
