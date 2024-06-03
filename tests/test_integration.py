@@ -3,13 +3,14 @@
 # test arriving message during step calculation
 # test that correct orders from market result are returned to agent
 
-import json, uuid, asyncio
+import uuid
 from httpx import AsyncClient
 from fastapi import FastAPI
 import pytest
 from hackathon_backend.main import lifespan
 from hackathon_backend.config import load_config
 import hackathon_backend.interface as interface
+import asyncio
 
 
 @pytest.fixture

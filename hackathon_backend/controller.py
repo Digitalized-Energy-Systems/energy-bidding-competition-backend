@@ -15,10 +15,15 @@ from hackathon_backend.units.pool import (
 from hackathon_backend.accounting.accounter import (
     ElectricityAskAuctionAccounter as Accounter,
 )
+from hackathon_backend.accounting.account import Account
+from hackathon_backend.general_demand import create_general_demand
+
 from hackathon_backend.accounting.account import (
     Account,
 )
 from hackathon_backend.config import Config, load_default_config
+
+SIMULATION_TIME_SECONDS_PER_STEP = 900
 
 
 class ControlException(Exception):
@@ -54,58 +59,74 @@ class Controller:
     def __init__(self, config: Config = None):
         self.market = Market()
         self.unit_pool = UnitPool()
-        self.current_task = asyncio.Future()
-        self.current_task.set_result(None)
+        self.registration_open = True
+        self.current_market_task = asyncio.Future()
+        self.current_market_task.set_result(None)
+        self.current_unit_task = asyncio.Future()
+        self.current_unit_task.set_result(None)
         self.registered = set()
         self.config = load_default_config() if config is None else config
         self.step = 0
         self.actor_accounts = {}
+        self.general_demand = None
         self.after_step_hooks = []
 
     def init(self):
+        print(f"Init controller...")
         self._main_loop = asyncio.create_task(self.initiate_stepping())
 
     def add_after_step_hook(self, hook):
         self.after_step_hooks.append(hook)
 
     async def initiate_stepping(self):
-        await asyncio.sleep(self.config.rt_step_init_delay_s)
+        try:
+            await asyncio.sleep(self.config.rt_step_init_delay_s)
+            print(f"Delay finished, starting the loop...")
+            self.general_demand = create_general_demand("gd0")
 
-        while True:
-            while self.config.pause:
-                asyncio.sleep(1)
+            while True:
+                while self.config.pause:
+                    asyncio.sleep(1)
+                self.registration_open = False
 
-            await asyncio.sleep(self.config.rt_step_duration_s)
-            self.current_task = asyncio.create_task(self.loop(self.step))
-            self.step += 1
+                print(f"Starting market task...{self.step}")
+                self.current_market_task = asyncio.create_task(
+                    self.loop_market(self.step)
+                )
+                await asyncio.sleep(self.config.rt_step_duration_s)
+                self.current_unit_task = asyncio.create_task(self.loop_units(self.step))
+                print(f"Step finished...{self.step}")
+                self.step += 1
 
-            try:
                 for hook in self.after_step_hooks:
                     hook(self)
-            except Exception as e:
-                print("The main loop crashed!")
-                print(e)
-                traceback.print_exc()
-
-    async def loop(self, time_step):
-        try:
-            # TODO step 15 minutes ahead
-            current_time = time.time()
-            current_time = time_step * 900
-
-            self.current_time = current_time  # only for testing
-
-            self.step_market(current_time=current_time)
-            self.step_units(current_time=current_time)
-            print(f"Step finished...{current_time}")
         except Exception as e:
-            print(f"The step {time_step} crashed!")
+            print("The main loop crashed!")
+            print(e)
+            traceback.print_exc()
+
+    async def loop_market(self, time_step):
+        try:
+            self.step_market(current_time=time_step * SIMULATION_TIME_SECONDS_PER_STEP)
+            print(f"Market stepped...{self.step}")
+        except Exception as e:
+            print(f"The market-step {time_step} crashed!")
+            print(e)
+            traceback.print_exc()
+
+    async def loop_units(self, time_step):
+        try:
+            self.step_units(current_time=time_step * SIMULATION_TIME_SECONDS_PER_STEP)
+            print(f"Units stepped...{self.step}")
+        except Exception as e:
+            print(f"The unit-step {time_step} crashed!")
             print(e)
             traceback.print_exc()
 
     async def get_current_time(self):  # only for testing
-        await self.check_step_done()
-        return self.current_time
+        await self.check_market_step_done()
+        await self.check_unit_step_done()
+        return self.step * SIMULATION_TIME_SECONDS_PER_STEP
 
     def step_market(self, current_time):
         """Step market to next time interval.
@@ -116,12 +137,14 @@ class Controller:
         market_inputs._now_dt = datetime.datetime.fromtimestamp(
             current_time
         )  # TODO insert correct time
-        market_inputs.step_size = 900
+        step_size = 900
+        market_inputs.step_size = step_size
         self.market.inputs = market_inputs
 
+        tender_amount = self.general_demand.step(None, current_time // step_size).p_kw
         # insert new acution into market
         self.market.receive_auction(
-            initiate_electricity_ask_auction(current_time, tender_amount=10)
+            initiate_electricity_ask_auction(current_time, tender_amount=tender_amount)
         )
         self.market.step()
 
@@ -129,10 +152,15 @@ class Controller:
         print(f"Step Units {current_time}...")
 
         market_results = self.market.get_current_auction_results()
-        accounter = None
-        accounter = Accounter(
-            auction_result=market_results.get(f"{current_time}_electricity", None)
-        )
+        auction_result = market_results.get(f"{current_time}_electricity", None)
+        # accounter = None
+        accounter = Accounter(auction_result=auction_result)
+        # retrieve tender_amount
+        if auction_result is not None:
+            tender_amount_kw = auction_result.params.tender_amount_kw
+        else:
+            tender_amount_kw = 0
+        provided_amount_kw = 0
 
         for actor_id in self.unit_pool.actor_to_root.keys():
             # retrieve setpoint from awarded orders
@@ -158,29 +186,44 @@ class Controller:
             )
             print(f"Payoff for actor {actor_id}... {payoff}")
 
-    async def check_step_done(self):
-        if not self.current_task.done():
-            await self.current_task
+            # store provided amount if bid was awarded
+            if setpoint > 0:
+                provided_amount_kw += actor_result.p_kw
+        self.general_demand.notify_supply(
+            tender_amount_kw=tender_amount_kw, provided_amount_kw=provided_amount_kw
+        )
+
+    async def check_market_step_done(self):
+        if not self.current_market_task.done():
+            await self.current_market_task
+
+    async def check_unit_step_done(self):
+        if not self.current_unit_task.done():
+            await self.current_unit_task
 
     async def register_actor(self, participant_id: str) -> List[UnitInformation]:
-        await self.check_step_done()
-        print(f"Registering actor {participant_id}...")
+        if self.registration_open:
+            print(f"Registering actor {participant_id}...")
 
-        if participant_id in self.config.participants:
-            if participant_id in self.registered:
-                raise ControlException(400, "The participant is already registered!")
-            self.registered.add(participant_id)
-            print(f"Registered actor {participant_id}...")
+            if participant_id in self.config.participants:
+                if participant_id in self.registered:
+                    raise ControlException(
+                        400, "The participant is already registered!"
+                    )
+                self.registered.add(participant_id)
+                print(f"Registered actor {participant_id}...")
+            else:
+                raise ControlException(403, "The requester is unknown!")
+
+            actor_id, root_unit = allocate_default_actor_units()
+            self.unit_pool.insert_actor_root(actor_id, root_unit)
+            self.actor_accounts[actor_id] = Account()
+            return actor_id, self.unit_pool.read_units(actor_id)
         else:
-            raise ControlException(403, "The requester is unknown!")
-
-        actor_id, root_unit = allocate_default_actor_units()
-        self.unit_pool.insert_actor_root(actor_id, root_unit)
-        self.actor_accounts[actor_id] = Account()
-        return actor_id, self.unit_pool.read_units(actor_id)
+            raise ControlException(405, "Registration is closed!")
 
     async def read_units(self, actor_id) -> List[UnitInformation]:
-        await self.check_step_done()
+        await self.check_unit_step_done()
 
         if not self.unit_pool.has_actor(actor_id):
             raise ControlException(404, "The actor id does not exist!")
@@ -188,7 +231,7 @@ class Controller:
 
     async def return_open_auction_params(self):
         """Return open auction params to enable actors to place orders."""
-        await self.check_step_done()
+        await self.check_market_step_done()
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
     async def receive_order(self, actor_id, amount_kw, price_ct, supply_time):
@@ -197,7 +240,7 @@ class Controller:
         :param order: Order object
         :param supply_time: Supply time of the auction (key to select auction)
         """
-        await self.check_step_done()
+        await self.check_market_step_done()
 
         if self.market.receive_order(
             amount_kw=amount_kw,
@@ -214,7 +257,7 @@ class Controller:
         """Return awarded orders for actor.
         :param actor_id: Actor identifier
         """
-        await self.check_step_done()
+        await self.check_market_step_done()
 
         current_results = self.market.get_current_auction_results()
         relevant_results = {}
@@ -236,7 +279,7 @@ class Controller:
         """
         Returns current auction results based on product type and supply time
         """
-        await self.check_step_done()
+        await self.check_market_step_done()
         return self.market.get_current_auction_results()
 
     def reset(self):

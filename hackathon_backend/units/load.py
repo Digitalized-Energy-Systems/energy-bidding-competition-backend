@@ -1,6 +1,9 @@
 from typing import List, Dict
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 
+N_TIME_INTERVALS = 96
+DEFAULT_LOAD_PROFILE = [5 for _ in range(N_TIME_INTERVALS)]
+
 
 class DemandInformation(UnitInformation):
     perfect_demand_p_kw: List[float]
@@ -21,6 +24,7 @@ class SimpleDemand:
     def __init__(
         self, p_demand_kw: List[float], q_demand_kvar: List[float], uncertainty: float
     ) -> None:
+        assert len(p_demand_kw) == len(q_demand_kvar)
         self._perfect_demand_p_kw = p_demand_kw
         self._perfect_demand_p_kvar = q_demand_kvar
         self._uncertainty = uncertainty
@@ -32,7 +36,9 @@ class SimpleDemand:
 
 class SimpleDemandUnit(Unit):
 
-    def __init__(self, demand_information: DemandInformation) -> None:
+    def __init__(
+        self, demand_information: DemandInformation, forecast_horizon=8
+    ) -> None:
         super().__init__(demand_information.unit_id)
 
         self._simple_demand = SimpleDemand(
@@ -41,7 +47,7 @@ class SimpleDemandUnit(Unit):
             demand_information.uncertainty,
         )
         self._internal_information = demand_information
-        self.forecast_horizon = 4
+        self.forecast_horizon = forecast_horizon
         self.time_step = 0  # None
 
     def step(
@@ -54,7 +60,7 @@ class SimpleDemandUnit(Unit):
 
     def read_information(self) -> UnitInformation:
         p, q = self.get_forecast(
-            start_index=self.time_step + 1,
+            start_index=self.time_step,
             end_index=self.time_step + 1 + self.forecast_horizon,
         )
         return ForecastedDemandInformation(
@@ -65,10 +71,14 @@ class SimpleDemandUnit(Unit):
         return self._internal_information
 
     def get_forecast(self, start_index, end_index):
+        # limit indices
+        start_index = min(start_index, len(self._simple_demand._perfect_demand_p_kw))
+        end_index = min(end_index, len(self._simple_demand._perfect_demand_p_kw))
+
         p_forecast = []
         q_forecast = []
-        for i in range(start_index, end_index):
-            p_fcast, q_fcast = self._simple_demand.forecast_demand(i)
+        for index in range(start_index, end_index):
+            p_fcast, q_fcast = self._simple_demand.forecast_demand(index)
             p_forecast.append(p_fcast)
             q_forecast.append(q_fcast)
         return p_forecast, q_forecast

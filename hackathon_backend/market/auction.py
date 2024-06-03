@@ -16,6 +16,7 @@ class AuctionParameters(BaseModel):
     supply_start_time: int
     supply_duration_s: int
     tender_amount_kw: float = 0.0
+    minimum_order_amount_kw: float = 1.0
 
 
 class Order(BaseModel):
@@ -83,7 +84,7 @@ class ElectricityAskAuction(Auction):
         self.update_status(current_time)
 
     def place_order(self, amount_kw, price_ct, agent):
-        if self.status == "open":
+        if self.status == "open" and amount_kw >= self.params.minimum_order_amount_kw:
             # create order object
             order = Order(
                 auction_id=self.id, amount_kw=amount_kw, price_ct=price_ct, agent=agent
@@ -174,7 +175,9 @@ class ElectricityAskAuction(Auction):
         }
 
 
-def initiate_electricity_ask_auction(current_time, tender_amount=10):
+def initiate_electricity_ask_auction(
+    current_time, tender_amount=10, minimum_order_amount_kw=1.0
+):
     # Create AuctionParameters object
     auction_parameters = AuctionParameters(
         product_type="electricity",
@@ -184,6 +187,7 @@ def initiate_electricity_ask_auction(current_time, tender_amount=10):
         + datetime.timedelta(hours=1, minutes=15).total_seconds(),
         supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
         tender_amount_kw=tender_amount,
+        minimum_order_amount_kw=minimum_order_amount_kw,
     )
     # Create a new auction
     return ElectricityAskAuction(params=auction_parameters, current_time=current_time)

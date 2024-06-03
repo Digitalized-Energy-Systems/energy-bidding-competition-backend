@@ -1,8 +1,7 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 from uuid import UUID
 import json
 from abc import abstractmethod, ABC
-from pydantic.dataclasses import dataclass
 from pydantic import BaseModel
 from hackathon_backend.controller import Controller
 from hackathon_backend.config import Config
@@ -41,7 +40,7 @@ class AuctionData(BaseModel):
     id: str
     status: str
     params: AuctionParameters
-    result: AuctionResult
+    result: Optional[AuctionResult]
     orders: List[Order]
 
 
@@ -89,8 +88,14 @@ def _to_actor_unit_root(id_to_unit_information_root: str):
     return _to_unit(unit_root_dict)
 
 
-def to_auction_data(auction: Auction):
-    return AuctionData(auction.id, auction.status, auction.params, auction.result)
+def to_auction_data(auction: ElectricityAskAuction):
+    return AuctionData(
+        id=auction.id,
+        status=auction.status,
+        params=auction.params,
+        result=auction.result,
+        orders=auction.order_container.orders,
+    )
 
 
 def to_auction_data_dict(auction_data_dict: Dict[str, Auction]):
@@ -112,7 +117,7 @@ def from_auction_data(auction_data: AuctionData):
 
 
 def from_auction_data_dict(auction_data_dict: Dict[str, AuctionData]):
-    return {k: from_auction_data(v) for k, v in auction_data_dict}
+    return {k: from_auction_data(v) for k, v in auction_data_dict.items()}
 
 
 def from_auction_data_list(auction_data_list: List[AuctionData]):

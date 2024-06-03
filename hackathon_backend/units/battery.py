@@ -59,7 +59,7 @@ class MidasBatteryUnit(BatteryUnit):
 
 def create_battery(
     id,
-    cap_kwh=10,
+    cap_kwh=12,
     p_charge_max_kw=2,
     p_discharge_max_kw=2,
     initial_soc=50,

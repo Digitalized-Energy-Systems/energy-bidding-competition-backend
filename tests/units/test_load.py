@@ -54,3 +54,18 @@ def test_get_forecast():
 
     # THEN
     assert forecast == ([1, 2, 3], [0, 1, 0])
+
+def test_get_forecast2():
+    
+    # GIVEN
+    demand_unit = SimpleDemandUnit(
+        "d1",
+        SimpleDemand(list(range(100)), list(range(100)), 1),
+    )
+
+    # WHEN
+    result = demand_unit.read_information()
+
+    # THEN
+    assert type(result.forecast_demand_p_kw) == list
+    assert len(result.forecast_demand_p_kw) == 9
