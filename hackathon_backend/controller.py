@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+import logging
 import time, datetime
 from typing import List
 from pydantic.dataclasses import dataclass
@@ -17,13 +18,11 @@ from hackathon_backend.accounting.accounter import (
 )
 from hackathon_backend.accounting.account import Account
 from hackathon_backend.general_demand import create_general_demand
-
-from hackathon_backend.accounting.account import (
-    Account,
-)
 from hackathon_backend.config import Config, load_default_config
 
 SIMULATION_TIME_SECONDS_PER_STEP = 900
+
+logger = logging.getLogger(__name__)
 
 
 class ControlException(Exception):
@@ -72,7 +71,7 @@ class Controller:
         self.after_step_hooks = []
 
     def init(self):
-        print(f"Init controller...")
+        logger.info("Init controller...")
         self._main_loop = asyncio.create_task(self.initiate_stepping())
 
     def add_after_step_hook(self, hook):
@@ -81,7 +80,7 @@ class Controller:
     async def initiate_stepping(self):
         try:
             await asyncio.sleep(self.config.rt_step_init_delay_s)
-            print(f"Delay finished, starting the loop...")
+            logger.info(f"Delay finished, starting the loop...")
             self.general_demand = create_general_demand("gd0")
 
             while True:
@@ -89,39 +88,33 @@ class Controller:
                     asyncio.sleep(1)
                 self.registration_open = False
 
-                print(f"Starting market task...{self.step}")
+                logger.info("Starting market task... %s", self.step)
                 self.current_market_task = asyncio.create_task(
                     self.loop_market(self.step)
                 )
                 await asyncio.sleep(self.config.rt_step_duration_s)
                 self.current_unit_task = asyncio.create_task(self.loop_units(self.step))
-                print(f"Step finished...{self.step}")
+                logger.info("Step finished... %s", self.step)
                 self.step += 1
 
                 for hook in self.after_step_hooks:
                     hook(self)
         except Exception as e:
-            print("The main loop crashed!")
-            print(e)
-            traceback.print_exc()
+            logger.exception("The main loop crashed!")
 
     async def loop_market(self, time_step):
         try:
             self.step_market(current_time=time_step * SIMULATION_TIME_SECONDS_PER_STEP)
-            print(f"Market stepped...{self.step}")
+            logger.info("Market stepped... %s", self.step)
         except Exception as e:
-            print(f"The market-step {time_step} crashed!")
-            print(e)
-            traceback.print_exc()
+            logger.exception("The market-step %s crashed!", time_step)
 
     async def loop_units(self, time_step):
         try:
             self.step_units(current_time=time_step * SIMULATION_TIME_SECONDS_PER_STEP)
-            print(f"Units stepped...{self.step}")
+            logger.info("Units stepped... %s", self.step)
         except Exception as e:
-            print(f"The unit-step {time_step} crashed!")
-            print(e)
-            traceback.print_exc()
+            logger.exception("The unit-step %s crashed!", time_step)
 
     async def get_current_time(self):  # only for testing
         await self.check_market_step_done()
@@ -132,7 +125,6 @@ class Controller:
         """Step market to next time interval.
         :param current_time: Current time in seconds (TODO align to time modelling)
         """
-        print(f"Step Market {current_time}...")
         market_inputs = MarketInputs()
         market_inputs._now_dt = datetime.datetime.fromtimestamp(
             current_time
@@ -149,7 +141,6 @@ class Controller:
         self.market.step()
 
     def step_units(self, current_time):
-        print(f"Step Units {current_time}...")
 
         market_results = self.market.get_current_auction_results()
         auction_result = market_results.get(f"{current_time}_electricity", None)
@@ -177,14 +168,14 @@ class Controller:
                 step=current_time // 900,
                 other_inputs=[],
             )
-            print(f"Stepped units of actor {actor_id}... {actor_result}")
+            logger.info("Stepped units of actor %s... %s", actor_id, actor_result)
 
             payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
             # store transaction in account
             self.actor_accounts[actor_id].add_transaction(
                 awarded_amount=setpoint, provided_power=actor_result.p_kw, payoff=payoff
             )
-            print(f"Payoff for actor {actor_id}... {payoff}")
+            logger.info("Payoff for actor %s... %s", actor_id, payoff)
 
             # store provided amount if bid was awarded
             if setpoint > 0:
@@ -203,7 +194,7 @@ class Controller:
 
     async def register_actor(self, participant_id: str) -> List[UnitInformation]:
         if self.registration_open:
-            print(f"Registering actor {participant_id}...")
+            logger.info("Registering actor %s...", participant_id)
 
             if participant_id in self.config.participants:
                 if participant_id in self.registered:
@@ -211,7 +202,7 @@ class Controller:
                         400, "The participant is already registered!"
                     )
                 self.registered.add(participant_id)
-                print(f"Registered actor {participant_id}...")
+                logger.info("Registered actor %s...", participant_id)
             else:
                 raise ControlException(403, "The requester is unknown!")
 

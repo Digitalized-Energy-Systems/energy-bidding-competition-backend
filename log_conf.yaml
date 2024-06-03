@@ -16,6 +16,12 @@ handlers:
     formatter: access
     class: logging.StreamHandler
     stream: ext://sys.stdout
+  file:
+    class: logging.FileHandler
+    level: INFO
+    formatter: access
+    filename: dgh-backend.log
+    mode: a
 loggers:
   uvicorn.error:
     level: INFO
@@ -31,4 +37,5 @@ root:
   level: DEBUG
   handlers:
     - default
+    - file
   propagate: no
