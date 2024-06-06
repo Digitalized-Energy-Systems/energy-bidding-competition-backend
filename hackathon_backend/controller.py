@@ -3,6 +3,7 @@ import traceback
 import logging
 import time, datetime
 from typing import List
+import pandas as pd
 from pydantic.dataclasses import dataclass
 from .units.pool import UnitPool, allocate_default_actor_units
 from .units.unit import UnitInput
@@ -55,7 +56,7 @@ class Controller:
       - return full results for gui
     """
 
-    def __init__(self, config: Config = None):
+    def __init__(self):
         self.market = Market()
         self.unit_pool = UnitPool()
         self.registration_open = True
@@ -64,11 +65,13 @@ class Controller:
         self.current_unit_task = asyncio.Future()
         self.current_unit_task.set_result(None)
         self.registered = set()
-        self.config = load_default_config() if config is None else config
+        self.config = load_default_config()
         self.step = 0
         self.actor_accounts = {}
         self.general_demand = None
         self.after_step_hooks = []
+        self.remaining_sleep = 0
+        self._actor_to_participant = {}
 
     def init(self):
         logger.info("Init controller...")
@@ -77,22 +80,39 @@ class Controller:
     def add_after_step_hook(self, hook):
         self.after_step_hooks.append(hook)
 
+    async def _sleep_with_info_update(self, time_s):
+        remaining_time = time_s
+        self.remaining_sleep = remaining_time
+        while remaining_time >= 1:
+            await asyncio.sleep(1)
+            remaining_time -= 1
+            self.remaining_sleep = remaining_time
+        if remaining_time > 0:
+            await asyncio.sleep(remaining_time)
+            self.remaining_sleep = 0
+
     async def initiate_stepping(self):
         try:
-            await asyncio.sleep(self.config.rt_step_init_delay_s)
+            await self._sleep_with_info_update(self.config.rt_step_init_delay_s)
+
             logger.info(f"Delay finished, starting the loop...")
             self.general_demand = create_general_demand("gd0")
 
             while True:
+                self.config = load_default_config()
                 while self.config.pause:
-                    asyncio.sleep(1)
+                    self.config = load_default_config()
+                    self.remaining_sleep = -1
+                    await asyncio.sleep(1)
+                    self.remaining_sleep = 0
+
                 self.registration_open = False
 
                 logger.info("Starting market task... %s", self.step)
                 self.current_market_task = asyncio.create_task(
                     self.loop_market(self.step)
                 )
-                await asyncio.sleep(self.config.rt_step_duration_s)
+                await self._sleep_with_info_update(self.config.rt_step_duration_s)
                 self.current_unit_task = asyncio.create_task(self.loop_units(self.step))
                 logger.info("Step finished... %s", self.step)
                 self.step += 1
@@ -116,10 +136,13 @@ class Controller:
         except Exception as e:
             logger.exception("The unit-step %s crashed!", time_step)
 
+    def get_current_simulation_time_unsafe(self):
+        return self.step * SIMULATION_TIME_SECONDS_PER_STEP
+
     async def get_current_time(self):  # only for testing
         await self.check_market_step_done()
         await self.check_unit_step_done()
-        return self.step * SIMULATION_TIME_SECONDS_PER_STEP
+        return self.get_current_simulation_time_unsafe()
 
     def step_market(self, current_time):
         """Step market to next time interval.
@@ -209,6 +232,7 @@ class Controller:
             actor_id, root_unit = allocate_default_actor_units()
             self.unit_pool.insert_actor_root(actor_id, root_unit)
             self.actor_accounts[actor_id] = Account()
+            self._actor_to_participant[actor_id] = participant_id
             return actor_id, self.unit_pool.read_units(actor_id)
         else:
             raise ControlException(405, "Registration is closed!")
@@ -224,6 +248,11 @@ class Controller:
         """Return open auction params to enable actors to place orders."""
         await self.check_market_step_done()
         return [auction["params"] for auction in self.market.get_open_auctions()]
+
+    async def return_auction_results(self):
+        """Return open auction params to enable actors to place orders."""
+        await self.check_market_step_done()
+        return self.market.current_auction_results
 
     async def receive_order(self, actor_id, amount_kw, price_ct, supply_time):
         """Receive order from actor and pass it to market.
@@ -272,6 +301,14 @@ class Controller:
         """
         await self.check_market_step_done()
         return self.market.get_current_auction_results()
+
+    async def get_balance_dict(self):
+        await self.check_market_step_done()
+        return {k: v.get_balance() for k, v in self.actor_accounts.items()}
+
+    async def get_gd_df(self) -> pd.DataFrame:
+        await self.check_market_step_done()
+        return self.general_demand.supply
 
     def reset(self):
         self.market.reset()

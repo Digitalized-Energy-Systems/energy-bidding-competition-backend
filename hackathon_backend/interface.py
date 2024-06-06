@@ -12,16 +12,6 @@ persistence_handler = JsonPersistenceHandler("app_state.json")
 controller.add_after_step_hook(lambda controller: persistence_handler.write(controller))
 
 
-@router.post("/admin/load")
-@router.post("/admin/load/")
-async def load_from_file():
-    global controller
-    controller = persistence_handler.load()
-    controller.add_after_step_hook(
-        lambda controller: persistence_handler.write(controller)
-    )
-
-
 @router.post("/hackathon/register")
 @router.post("/hackathon/register/")
 async def register_actor(participant_id: str):
@@ -80,3 +70,52 @@ async def read_auction_result(actor_id: str):
         return await controller.return_awarded_orders(actor_id)
     except ControlException as e:
         raise HTTPException(e.code, e.message)
+
+
+@router.get("/account/balances")
+@router.get("/account/balances/")
+async def read_balances():
+    try:
+        return await controller.get_balance_dict()
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.get("/system/demand")
+@router.get("/system/demand/")
+async def read_balances():
+    try:
+        return (await controller.get_gd_df()).to_json()
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.post("/admin/load")
+@router.post("/admin/load/")
+async def load_from_file():
+    global controller
+    controller = persistence_handler.load()
+    controller.add_after_step_hook(
+        lambda controller: persistence_handler.write(controller)
+    )
+
+
+@router.get("/ui/auction/results")
+@router.get("/ui/auction/results/")
+async def read_results():
+    try:
+        return {"results": await controller.return_auction_results()}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.get("/ui/next_step")
+@router.get("/ui/next_step/")
+async def seconds_until_next_step():
+    return controller.remaining_sleep
+
+
+@router.get("/ui/current_st")
+@router.get("/ui/current_st/")
+async def last_step_simulation_time():
+    return controller.get_current_simulation_time_unsafe()
