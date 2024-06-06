@@ -70,4 +70,11 @@ def create_general_demand(
             ),
         )
     else:
-        return GeneralDemand(id, SimpleDemand(p_profile, q_profile, 1))
+        return GeneralDemand(
+            DemandInformation(
+                unit_id=id,
+                perfect_demand_p_kw=p_profile,
+                perfect_demand_q_kvar=q_profile,
+                uncertainty=1,
+            )
+        )

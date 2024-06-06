@@ -1,3 +1,4 @@
+from typing import Optional
 from abc import ABC, abstractmethod
 from dataclasses import asdict
 from pydantic import BaseModel
@@ -33,7 +34,7 @@ class AwardedOrder(Order):
 class AuctionResult(BaseModel):
     auction_id: str
     params: AuctionParameters
-    clearing_price: float
+    clearing_price: Optional[float]
     awarded_orders: List[AwardedOrder]
 
 
