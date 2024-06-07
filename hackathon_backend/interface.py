@@ -1,5 +1,3 @@
-import json
-from uuid import UUID
 from typing import List
 from fastapi import APIRouter, HTTPException
 from hackathon_backend.controller import Controller, ControlException
@@ -56,7 +54,22 @@ async def place_order(
     try:
         return {
             "order_ok": await controller.receive_order(
-                actor_id, amount_kw, price_ct, supply_time
+                [actor_id], [amount_kw], price_ct, supply_time
+            )
+        }
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.post("/market/auction/grouporder")
+@router.post("/market/auction/grouporder/")
+async def place_order(
+    actor_ids: List[str], amount_kws: List[float], price_ct: float, supply_time: int
+):
+    try:
+        return {
+            "order_ok": await controller.receive_order(
+                actor_ids, amount_kws, price_ct, supply_time
             )
         }
     except ControlException as e:
@@ -83,7 +96,7 @@ async def read_balances():
 
 @router.get("/system/demand")
 @router.get("/system/demand/")
-async def read_balances():
+async def read_demand():
     try:
         return (await controller.get_gd_df()).to_json()
     except ControlException as e:

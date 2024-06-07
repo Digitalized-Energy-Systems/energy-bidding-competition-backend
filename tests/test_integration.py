@@ -23,6 +23,7 @@ async def setup_controller():
     # setup code
     app = FastAPI(lifespan=lifespan)
     app.include_router(interface.router)
+    interface.controller.config_file = "tests/config.json"
     interface.controller.config = load_config("tests/config.json")
     yield app  # this is where the test will start
 
