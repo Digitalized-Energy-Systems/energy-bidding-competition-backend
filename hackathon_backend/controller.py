@@ -19,7 +19,7 @@ from hackathon_backend.accounting.accounter import (
 )
 from hackathon_backend.accounting.account import Account
 from hackathon_backend.general_demand import create_general_demand
-from hackathon_backend.config import Config, load_default_config
+from hackathon_backend.config import Config, load_config
 
 SIMULATION_TIME_SECONDS_PER_STEP = 900
 
@@ -56,7 +56,7 @@ class Controller:
       - return full results for gui
     """
 
-    def __init__(self):
+    def __init__(self, config_file="config.json"):
         self.market = Market()
         self.unit_pool = UnitPool()
         self.registration_open = True
@@ -65,7 +65,8 @@ class Controller:
         self.current_unit_task = asyncio.Future()
         self.current_unit_task.set_result(None)
         self.registered = set()
-        self.config = load_default_config()
+        self.config_file = config_file
+        self.config = load_config(self.config_file)
         self.step = 0
         self.actor_accounts = {}
         self.general_demand = None
@@ -93,15 +94,16 @@ class Controller:
 
     async def initiate_stepping(self):
         try:
+            self.config = load_config(self.config_file)
             await self._sleep_with_info_update(self.config.rt_step_init_delay_s)
 
             logger.info(f"Delay finished, starting the loop...")
             self.general_demand = create_general_demand("gd0")
 
             while True:
-                self.config = load_default_config()
+                self.config = load_config(self.config_file)
                 while self.config.pause:
-                    self.config = load_default_config()
+                    self.config = load_config(self.config_file)
                     self.remaining_sleep = -1
                     await asyncio.sleep(1)
                     self.remaining_sleep = 0
@@ -157,6 +159,7 @@ class Controller:
         self.market.inputs = market_inputs
 
         tender_amount = self.general_demand.step(None, current_time // step_size).p_kw
+
         # insert new acution into market
         self.market.receive_auction(
             initiate_electricity_ask_auction(current_time, tender_amount=tender_amount)
@@ -178,31 +181,43 @@ class Controller:
 
         for actor_id in self.unit_pool.actor_to_root.keys():
             # retrieve setpoint from awarded orders
-            setpoint = accounter.return_awarded_sum(actor_id)
+            for i, setpoint in enumerate(accounter.return_awarded(actor_id)):
 
-            # step actor
-            actor_result = self.unit_pool.step_actor(
-                uuid=actor_id,
-                input=UnitInput(
-                    delta_t=900,
-                    p_kw=setpoint,
-                    q_kvar=0,
-                ),
-                step=current_time // 900,
-                other_inputs=[],
-            )
-            logger.info("Stepped units of actor %s... %s", actor_id, actor_result)
+                # step actor
+                actor_result = self.unit_pool.step_actor(
+                    uuid=actor_id,
+                    input=UnitInput(
+                        delta_t=900,
+                        p_kw=setpoint,
+                        q_kvar=0,
+                    ),
+                    step=current_time // 900,
+                    other_inputs=[],
+                )
+                logger.info("Stepped units of actor %s... %s", actor_id, actor_result)
 
-            payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
-            # store transaction in account
-            self.actor_accounts[actor_id].add_transaction(
-                awarded_amount=setpoint, provided_power=actor_result.p_kw, payoff=payoff
-            )
-            logger.info("Payoff for actor %s... %s", actor_id, payoff)
+                # store provided amount if bid was awarded
+                if setpoint > 0:
+                    provided_amount_kw += actor_result.p_kw
 
-            # store provided amount if bid was awarded
-            if setpoint > 0:
-                provided_amount_kw += actor_result.p_kw
+                    payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
+                    logger.info("Payoff for actor %s... %s", actor_id, payoff)
+
+                    # Award the correct account
+                    agents = accounter.return_awarded_agents(actor_id, i)
+                    agent_key = str(agents)
+                    if len(agents) == 1:
+                        agent_key = list(agents)[0]
+
+                    # store transaction in account
+                    if not agent_key in self.actor_accounts:
+                        self.actor_accounts[agent_key] = Account()
+                    self.actor_accounts[agent_key].add_transaction(
+                        awarded_amount=setpoint,
+                        provided_power=actor_result.p_kw,
+                        payoff=payoff,
+                    )
+
         self.general_demand.notify_supply(
             tender_amount_kw=tender_amount_kw, provided_amount_kw=provided_amount_kw
         )
@@ -254,7 +269,7 @@ class Controller:
         await self.check_market_step_done()
         return self.market.current_auction_results
 
-    async def receive_order(self, actor_id, amount_kw, price_ct, supply_time):
+    async def receive_order(self, actor_ids, amount_kws, price_ct, supply_time):
         """Receive order from actor and pass it to market.
         :param actor_id: Actor identifier
         :param order: Order object
@@ -263,9 +278,9 @@ class Controller:
         await self.check_market_step_done()
 
         if self.market.receive_order(
-            amount_kw=amount_kw,
+            amount_kws=amount_kws,
             price_ct=price_ct,
-            agent=actor_id,
+            agents=actor_ids,
             supply_time=supply_time,
             product_type="electricity",
         ):
@@ -304,7 +319,7 @@ class Controller:
 
     async def get_balance_dict(self):
         await self.check_market_step_done()
-        return {k: v.get_balance() for k, v in self.actor_accounts.items()}
+        return {str(k): v.get_balance() for k, v in self.actor_accounts.items()}
 
     async def get_gd_df(self) -> pd.DataFrame:
         await self.check_market_step_done()
