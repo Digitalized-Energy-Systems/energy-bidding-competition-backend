@@ -1,4 +1,5 @@
 from typing import List, Dict
+import random
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
 import datetime
@@ -89,7 +90,12 @@ class MidasPVUnit(Unit):
         p_forecast = []
         for step in range(start_index, end_index):
             result = self.get_pv_power(UnitInput(step_size, None, None), step)
-            p_forecast.append(result.p_kw)
+            # respect growing uncertainty with forecast time
+            step_index = step - start_index
+            factor_uncert = step_index * 0.05
+            factor_const = 1 - factor_uncert
+            # add value to forecast
+            p_forecast.append(result.p_kw * (factor_const + random.uniform(-1, 1) * factor_uncert))
 
         return p_forecast
 

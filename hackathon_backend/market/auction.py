@@ -17,6 +17,7 @@ class AuctionParameters(BaseModel):
     supply_duration_s: int
     tender_amount_kw: float = 0.0
     minimum_order_amount_kw: float = 1.0
+    maximum_price_ct: float = 1000
 
 
 class Order(BaseModel):
@@ -84,6 +85,10 @@ class ElectricityAskAuction(Auction):
         self.update_status(current_time)
 
     def place_order(self, amount_kws, price_ct, agents):
+        # limit order price
+        if price_ct > self.params.maximum_price_ct:
+            price_ct = self.params.maximum_price_ct
+        # place order
         if (
             self.status == "open"
             and sum(amount_kws) >= self.params.minimum_order_amount_kw
