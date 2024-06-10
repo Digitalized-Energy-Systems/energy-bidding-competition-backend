@@ -97,7 +97,7 @@ async def test_simulation_loop_group_order_phase_2(setup_controller):
                     register_resultA["actor_id"],
                     register_resultB["actor_id"],
                 ],
-                "amount_kws": [10, 10],
+                "amount_kw": [10, 10],
             },
             params={
                 "price_ct": 10,

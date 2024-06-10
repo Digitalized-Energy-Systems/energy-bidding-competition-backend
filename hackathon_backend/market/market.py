@@ -73,7 +73,7 @@ class Market:
 
     # method to receive orders and map them to auctions
     def receive_order(
-        self, amount_kws, price_ct, agents, supply_time, product_type, auction_id=None
+        self, amount_kw, price_ct, agents, supply_time, product_type, auction_id=None
     ):
         """
         Receives orders and maps them to auctions
@@ -84,7 +84,7 @@ class Market:
             )
         if auction_id is not None:
             self.auctions[auction_id].place_order(
-                amount_kws=amount_kws, price_ct=price_ct, agents=agents
+                amount_kw=amount_kw, price_ct=price_ct, agents=agents
             )
             return True
         else:

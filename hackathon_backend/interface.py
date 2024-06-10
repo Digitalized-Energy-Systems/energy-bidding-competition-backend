@@ -68,12 +68,12 @@ async def place_order(
 @router.post("/market/auction/grouporder")
 @router.post("/market/auction/grouporder/")
 async def place_order(
-    actor_ids: List[str], amount_kws: List[float], price_ct: float, supply_time: int
+    actor_ids: List[str], amount_kw: List[float], price_ct: float, supply_time: int
 ):
     try:
         return {
             "order_ok": await controller.receive_order(
-                actor_ids, amount_kws, price_ct, supply_time
+                actor_ids, amount_kw, price_ct, supply_time
             )
         }
     except ControlException as e:

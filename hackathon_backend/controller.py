@@ -278,7 +278,7 @@ class Controller:
         await self.check_market_step_done()
         return self.market.current_auction_results
 
-    async def receive_order(self, actor_ids, amount_kws, price_ct, supply_time):
+    async def receive_order(self, actor_ids, amount_kw, price_ct, supply_time):
         """Receive order from actor and pass it to market.
         :param actor_id: Actor identifier
         :param order: Order object
@@ -287,7 +287,7 @@ class Controller:
         await self.check_market_step_done()
 
         if self.market.receive_order(
-            amount_kws=amount_kws,
+            amount_kw=amount_kw,
             price_ct=price_ct,
             agents=actor_ids,
             supply_time=supply_time,

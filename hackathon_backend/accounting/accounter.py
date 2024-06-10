@@ -28,8 +28,8 @@ class ElectricityAskAuctionAccounter:
                         pd.DataFrame(
                             [
                                 {
-                                    AMOUNT: awarded_order.awarded_amount_kws[i],
-                                    TOTAL_AMOUNT: sum(awarded_order.awarded_amount_kws),
+                                    AMOUNT: awarded_order.awarded_amount_kw[i],
+                                    TOTAL_AMOUNT: sum(awarded_order.awarded_amount_kw),
                                     AGENTS: set(agents),
                                     PRICE: awarded_order.price_ct,
                                 }

@@ -22,13 +22,13 @@ class AuctionParameters(BaseModel):
 
 class Order(BaseModel):
     agents: List[str]
-    amount_kws: List[float]
+    amount_kw: List[float]
     price_ct: float
     auction_id: str
 
 
 class AwardedOrder(Order):
-    awarded_amount_kws: List[float]
+    awarded_amount_kw: List[float]
 
 
 class AuctionResult(BaseModel):
@@ -62,7 +62,7 @@ class Auction(ABC):
         time dependent actions"""
 
     @abstractmethod
-    def place_order(self, amount_kws, price_ct, agents):
+    def place_order(self, amount_kw, price_ct, agents):
         """Place an order in the auction"""
 
 
@@ -84,19 +84,19 @@ class ElectricityAskAuction(Auction):
 
         self.update_status(current_time)
 
-    def place_order(self, amount_kws, price_ct, agents):
+    def place_order(self, amount_kw, price_ct, agents):
         # limit order price
         if price_ct > self.params.maximum_price_ct:
             price_ct = self.params.maximum_price_ct
         # place order
         if (
             self.status == "open"
-            and sum(amount_kws) >= self.params.minimum_order_amount_kw
+            and sum(amount_kw) >= self.params.minimum_order_amount_kw
         ):
             # create order object
             order = Order(
                 auction_id=self.id,
-                amount_kws=amount_kws,
+                amount_kw=amount_kw,
                 price_ct=price_ct,
                 agents=agents,
             )
@@ -141,30 +141,30 @@ class ElectricityAskAuction(Auction):
         total_awarded_amount = 0
         for order in self.order_container.orders:
             if (
-                total_awarded_amount + sum(order.amount_kws)
+                total_awarded_amount + sum(order.amount_kw)
                 < self.params.tender_amount_kw
             ):
                 awarded_orders.append(
                     AwardedOrder(
                         auction_id=order.auction_id,
-                        amount_kws=order.amount_kws,
+                        amount_kw=order.amount_kw,
                         price_ct=order.price_ct,
                         agents=order.agents,
-                        awarded_amount_kws=order.amount_kws,
+                        awarded_amount_kw=order.amount_kw,
                     )
                 )
-                total_awarded_amount += sum(order.amount_kws)
+                total_awarded_amount += sum(order.amount_kw)
             else:
                 remaining = self.params.tender_amount_kw - total_awarded_amount
                 awarded_orders.append(
                     AwardedOrder(
                         auction_id=order.auction_id,
-                        amount_kws=order.amount_kws,
+                        amount_kw=order.amount_kw,
                         price_ct=order.price_ct,
                         agents=order.agents,
-                        awarded_amount_kws=[
-                            amount_kw / sum(order.amount_kws) * remaining
-                            for amount_kw in order.amount_kws
+                        awarded_amount_kw=[
+                            amount_kw / sum(order.amount_kw) * remaining
+                            for amount_kw in order.amount_kw
                         ],
                     )
                 )
