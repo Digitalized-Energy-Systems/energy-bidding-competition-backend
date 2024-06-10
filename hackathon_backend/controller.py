@@ -102,7 +102,7 @@ class Controller:
 
             while True:
                 self.config = load_config(self.config_file)
-                while self.config.pause:
+                while self.config.pause or self.step == self.config.max_steps:
                     self.config = load_config(self.config_file)
                     self.remaining_sleep = -1
                     await asyncio.sleep(1)

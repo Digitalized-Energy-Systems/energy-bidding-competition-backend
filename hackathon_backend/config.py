@@ -13,6 +13,7 @@ class Config(BaseModel):
     rt_step_duration_s: float
     rt_step_init_delay_s: float
     pause: bool
+    max_steps: int
 
 
 def load_config(config_file) -> Config:
