@@ -132,3 +132,9 @@ async def seconds_until_next_step():
 @router.get("/ui/current_st/")
 async def last_step_simulation_time():
     return controller.get_current_simulation_time_unsafe()
+
+
+@router.get("/ui/participant_map")
+@router.get("/ui/participant_map/")
+async def participant_map():
+    return controller.actor_to_participant
