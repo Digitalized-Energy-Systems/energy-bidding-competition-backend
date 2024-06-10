@@ -72,7 +72,7 @@ class Controller:
         self.general_demand = None
         self.after_step_hooks = []
         self.remaining_sleep = 0
-        self._actor_to_participant = {}
+        self.actor_to_participant = {}
 
     def init(self):
         logger.info("Init controller...")
@@ -108,7 +108,8 @@ class Controller:
                     await asyncio.sleep(1)
                     self.remaining_sleep = 0
 
-                self.registration_open = False
+                if not self.config.test_mode:
+                    self.registration_open = False
 
                 logger.info("Starting market task... %s", self.step)
                 self.current_market_task = asyncio.create_task(
@@ -230,12 +231,20 @@ class Controller:
         if not self.current_unit_task.done():
             await self.current_unit_task
 
+    def _part_to_actor_id(self, part_id):
+        for a, p in self.actor_to_participant.items():
+            if p == part_id:
+                return a
+
     async def register_actor(self, participant_id: str) -> List[UnitInformation]:
         if self.registration_open:
             logger.info("Registering actor %s...", participant_id)
 
             if participant_id in self.config.participants:
                 if participant_id in self.registered:
+                    if self.config.test_mode:
+                        aid = self._part_to_actor_id(participant_id)
+                        return aid, self.unit_pool.read_units(aid)
                     raise ControlException(
                         400, "The participant is already registered!"
                     )
@@ -247,7 +256,7 @@ class Controller:
             actor_id, root_unit = allocate_default_actor_units()
             self.unit_pool.insert_actor_root(actor_id, root_unit)
             self.actor_accounts[actor_id] = Account()
-            self._actor_to_participant[actor_id] = participant_id
+            self.actor_to_participant[actor_id] = participant_id
             return actor_id, self.unit_pool.read_units(actor_id)
         else:
             raise ControlException(405, "Registration is closed!")
@@ -302,7 +311,7 @@ class Controller:
                 "order": [
                     awarded_order
                     for awarded_order in auction_result.awarded_orders
-                    if awarded_order.agent == actor_id
+                    if actor_id in awarded_order.agents
                 ],
                 "clearing_price": auction_result.clearing_price,
             }
