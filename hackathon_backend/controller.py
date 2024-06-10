@@ -326,6 +326,9 @@ class Controller:
         await self.check_market_step_done()
         return self.market.get_current_auction_results()
 
+    def get_balance_dict_sync(self):
+        return {str(k): v.get_balance() for k, v in self.actor_accounts.items()}
+
     async def get_balance_dict(self):
         await self.check_market_step_done()
         return {str(k): v.get_balance() for k, v in self.actor_accounts.items()}

@@ -1,13 +1,17 @@
+import time
 from typing import List
 from fastapi import APIRouter, HTTPException
 from hackathon_backend.controller import Controller, ControlException
 from hackathon_backend.persistence import JsonPersistenceHandler
+from hackathon_backend.score import CsvScoreHandler
 
 router = APIRouter()
 
 controller: Controller = Controller()
 persistence_handler = JsonPersistenceHandler("app_state.json")
+score_handler = CsvScoreHandler(time.time())
 controller.add_after_step_hook(lambda controller: persistence_handler.write(controller))
+controller.add_after_step_hook(lambda controller: score_handler.write(controller))
 
 
 @router.post("/hackathon/register")
