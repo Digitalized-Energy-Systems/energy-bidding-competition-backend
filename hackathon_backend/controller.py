@@ -159,7 +159,7 @@ class Controller:
         market_inputs.step_size = step_size
         self.market.inputs = market_inputs
 
-        tender_amount = self.general_demand.step(None, current_time // step_size).p_kw
+        tender_amount = len(self.registered) * self.general_demand.step(None, current_time // step_size).p_kw
 
         # insert new acution into market
         self.market.receive_auction(
