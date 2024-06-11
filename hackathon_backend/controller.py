@@ -198,7 +198,7 @@ class Controller:
             logger.info("Stepped units of actor %s... %s", actor_id, actor_result)
 
             # store provided amount if bid was awarded
-            provided_amount_kw += actor_result.p_kw
+            provided_amount_kw += max(min(actor_result.p_kw, setpoint), 0)
 
             payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
             logger.info("Payoff for actor %s... %s", actor_id, payoff)

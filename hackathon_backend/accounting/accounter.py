@@ -70,6 +70,7 @@ class ElectricityAskAuctionAccounter:
             return 0
 
         total_awarded_amount = sum(self.awarded_orders[agent][AMOUNT])
+        # TODO malus for missing energy
 
         if total_provided_amount >= total_awarded_amount:
             return (
