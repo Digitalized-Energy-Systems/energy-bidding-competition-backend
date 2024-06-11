@@ -27,7 +27,7 @@ def anyio_backend():
 
 @dataclass
 class Order:
-    agent: str
+    agents: str
     amount_kw: float
     price_ct: float
 
@@ -107,11 +107,11 @@ def test_sum_calculation():
     # GIVEN
 
     orders1 = [
-        Order(agent=ag, amount_kw=1, price_ct=pr)
+        Order(agents=ag, amount_kw=1, price_ct=pr)
         for ag, pr in zip(["A", "B", "C"], [1, 2, 3])
     ]
     orders2 = [
-        Order(agent=ag, amount_kw=1, price_ct=pr)
+        Order(agents=ag, amount_kw=1, price_ct=pr)
         for ag, pr in zip(["A", "B", "C"], [4, 5, 6])
     ]
     orders = orders1 + orders2
@@ -127,7 +127,7 @@ def test_sum_calculation():
         current_time=0,
     )
     for order in orders:
-        auction.place_order(order.amount_kw, order.price_ct, order.agent)
+        auction.place_order(order.amount_kw, order.price_ct, order.agents)
     # WHEN
     accounter = Accounter(auction_result=auction.clear())
 
@@ -140,11 +140,11 @@ def test_sum_calculation():
 def test_payoff_calculation():
     # GIVEN
     orders1 = [
-        Order(agent=ag, amount_kw=1, price_ct=pr)
+        Order(agents=[ag], amount_kw=[1], price_ct=pr)
         for ag, pr in zip(["A", "B", "C"], [1, 2, 3])
     ]
     orders2 = [
-        Order(agent=ag, amount_kw=1, price_ct=pr)
+        Order(agents=[ag], amount_kw=[1], price_ct=pr)
         for ag, pr in zip(["A", "B", "C"], [4, 5, 6])
     ]
     orders = orders1 + orders2
@@ -160,15 +160,15 @@ def test_payoff_calculation():
         current_time=0,
     )
     for order in orders:
-        auction.place_order(order.amount_kw, order.price_ct, order.agent)
+        auction.place_order(order.amount_kw, order.price_ct, order.agents)
     # WHEN
     accounter = Accounter(auction_result=auction.clear())
 
     # THEN
     assert accounter.calculate_payoff("A", 2) == 5
-    assert accounter.calculate_payoff("A", 1.5) == 3
-    assert accounter.calculate_payoff("A", 1) == 1
-    assert accounter.calculate_payoff("A", 0.5) == 0.5
+    assert accounter.calculate_payoff("A", 1.5) == 1
+    assert accounter.calculate_payoff("A", 1) == -3
+    assert accounter.calculate_payoff("A", 0.5) == -4
     assert accounter.calculate_payoff("B", 2) == 4.5
     assert accounter.calculate_payoff("B", 1.5) == 4.5
     assert accounter.calculate_payoff("B", 1) == 2
