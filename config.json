@@ -7,8 +7,8 @@
         "StefanieMartin33",
         "EmiliePauline09"
     ],
-    "rt_step_duration_s": 60,
-    "rt_step_init_delay_s": 1,
+    "rt_step_duration_s": 10,
+    "rt_step_init_delay_s": 30,
     "pause": false,
     "max_steps": 96,
     "test_mode": true

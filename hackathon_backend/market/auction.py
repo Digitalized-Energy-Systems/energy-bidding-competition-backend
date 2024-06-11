@@ -103,13 +103,11 @@ class ElectricityAskAuction(Auction):
             # store order
             self.order_container.add_order(order)
 
-            logger.debug(f"Auction {self.id}: Received and stored order {order}")
+            logger.info(f"Auction {self.id}: Received and stored order {order}")
         else:
-            logger.debug(
-                f"Auction {self.id}: Received order {order},"
-                "although auction not open. Ignoring."
+            raise Exception(
+                "Order not valid, the amount_kw is below the allowed minimum or the auction is not open!"
             )
-            raise Exception("Order not valid, the amount_kw is below the allowed minimum or the auction is not open!")
 
     def update_status(self, current_time):
         if current_time is None:

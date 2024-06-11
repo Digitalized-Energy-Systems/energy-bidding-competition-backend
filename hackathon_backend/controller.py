@@ -94,11 +94,10 @@ class Controller:
 
     async def initiate_stepping(self):
         try:
-            self.config = load_config(self.config_file)
-            await self._sleep_with_info_update(self.config.rt_step_init_delay_s)
-
             logger.info(f"Delay finished, starting the loop...")
+            self.config = load_config(self.config_file)
             self.general_demand = create_general_demand("gd0")
+            await self._sleep_with_info_update(self.config.rt_step_init_delay_s)
 
             while True:
                 self.config = load_config(self.config_file)
@@ -159,7 +158,10 @@ class Controller:
         market_inputs.step_size = step_size
         self.market.inputs = market_inputs
 
-        tender_amount = len(self.registered) * self.general_demand.step(None, current_time // step_size).p_kw
+        tender_amount = (
+            len(self.registered)
+            * self.general_demand.step(None, current_time // step_size).p_kw
+        )
 
         # insert new acution into market
         self.market.receive_auction(
@@ -199,6 +201,9 @@ class Controller:
 
             # store provided amount if bid was awarded
             provided_amount_kw += max(min(actor_result.p_kw, setpoint), 0)
+            logger.info(
+                "provided_amount_kw for actor %s... %s", actor_id, provided_amount_kw
+            )
 
             payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
             logger.info("Payoff for actor %s... %s", actor_id, payoff)
@@ -220,8 +225,8 @@ class Controller:
                     provided_power=actor_result.p_kw,
                     payoff=payoff_part,
                 )
-            
-            penalty_ct = 30 / 4 # 30 ct per quarterhour
+
+            penalty_ct = 1000 / 4  # 30 ct per quarterhour
             if actor_result.p_kw < 0:
                 self.actor_accounts[agent_key].add_transaction(
                     awarded_amount=0,
@@ -305,13 +310,13 @@ class Controller:
             )
         except Exception as e:
             raise ControlException(400, str(e))
-        
+
         # TODO move exception creation to the market
         if ok:
             return True
         else:
             raise ControlException(404, "The specified auction does not exist!")
-        
+
     async def return_awarded_orders(self, actor_id):
         """Return awarded orders for actor.
         :param actor_id: Actor identifier
