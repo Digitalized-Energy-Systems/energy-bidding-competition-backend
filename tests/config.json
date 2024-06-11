@@ -7,5 +7,6 @@
     "rt_step_duration_s": 0.5,
     "rt_step_init_delay_s": 0.1,
     "pause": false,
-    "max_steps": 96
+    "max_steps": 96,
+    "test_mode": true
 }
