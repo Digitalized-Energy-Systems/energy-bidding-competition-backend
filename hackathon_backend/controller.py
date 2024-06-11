@@ -159,7 +159,7 @@ class Controller:
         market_inputs.step_size = step_size
         self.market.inputs = market_inputs
 
-        tender_amount = self.general_demand.step(None, current_time // step_size).p_kw
+        tender_amount = len(self.registered) * self.general_demand.step(None, current_time // step_size).p_kw
 
         # insert new acution into market
         self.market.receive_auction(
@@ -287,18 +287,23 @@ class Controller:
         :param supply_time: Supply time of the auction (key to select auction)
         """
         await self.check_market_step_done()
-
-        if self.market.receive_order(
-            amount_kw=amount_kw,
-            price_ct=price_ct,
-            agents=actor_ids,
-            supply_time=supply_time,
-            product_type="electricity",
-        ):
+        try:
+            ok = self.market.receive_order(
+                amount_kw=amount_kw,
+                price_ct=price_ct,
+                agents=actor_ids,
+                supply_time=supply_time,
+                product_type="electricity",
+            )
+        except Exception as e:
+            raise ControlException(400, str(e))
+        
+        # TODO move exception creation to the market
+        if ok:
             return True
         else:
             raise ControlException(404, "The specified auction does not exist!")
-
+        
     async def return_awarded_orders(self, actor_id):
         """Return awarded orders for actor.
         :param actor_id: Actor identifier
