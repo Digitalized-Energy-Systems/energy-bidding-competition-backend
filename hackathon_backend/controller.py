@@ -288,6 +288,13 @@ class Controller:
         await self.check_market_step_done()
         return [auction["params"] for auction in self.market.get_open_auctions()]
 
+
+    async def return_price_history(self):
+        """Return open auction params to enable actors to place orders."""
+        await self.check_market_step_done()
+        return [auction.result.clearing_price for auction in self.market.expired_auctions]
+
+
     async def return_auction_results(self):
         """Return open auction params to enable actors to place orders."""
         await self.check_market_step_done()

@@ -50,6 +50,16 @@ async def read_auctions():
         raise HTTPException(e.code, e.message)
 
 
+
+@router.get("/market/auction/price_history")
+@router.get("/market/auction/price_history/")
+async def read_market_history():
+    try:
+        return {"price_history": await controller.return_price_history()}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
 @router.post("/market/auction/order")
 @router.post("/market/auction/order/")
 async def place_order(
