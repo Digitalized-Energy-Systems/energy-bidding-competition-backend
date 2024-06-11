@@ -220,6 +220,14 @@ class Controller:
                     provided_power=actor_result.p_kw,
                     payoff=payoff_part,
                 )
+            
+            penalty_ct = 30 / 4 # 30 ct per quarterhour
+            if actor_result.p_kw < 0:
+                self.actor_accounts[agent_key].add_transaction(
+                    awarded_amount=0,
+                    provided_power=actor_result.p_kw,
+                    payoff=actor_result.p_kw * penalty_ct,
+                )
 
         self.general_demand.notify_supply(
             tender_amount_kw=tender_amount_kw, provided_amount_kw=provided_amount_kw

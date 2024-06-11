@@ -68,27 +68,14 @@ class ElectricityAskAuctionAccounter:
     def calculate_payoff(self, agent, total_provided_amount):
         if self.result is None or agent not in self.awarded_orders:
             return 0
+        
+        awarded_amount_added_up = 0
+        payoff = 0
+        for _, row in self.awarded_orders[agent].iterrows():
+            order_provided_amount = max(min(row[AMOUNT], total_provided_amount - awarded_amount_added_up), 0)
+            payoff += row[PRICE] * order_provided_amount
+            payoff -= row[PRICE] * (row[AMOUNT] - order_provided_amount)
+            
+            awarded_amount_added_up = row[AMOUNT] + awarded_amount_added_up
 
-        total_awarded_amount = sum(self.awarded_orders[agent][AMOUNT])
-        # TODO malus for missing energy
-
-        if total_provided_amount >= total_awarded_amount:
-            return (
-                self.awarded_orders[agent][PRICE] * self.awarded_orders[agent][AMOUNT]
-            ).sum()
-
-        elif total_provided_amount <= 0:
-            return 0
-        else:
-            amount_added_up = 0
-            payoff = 0
-            for _, row in self.awarded_orders[agent].iterrows():
-                if amount_added_up + row[AMOUNT] <= total_provided_amount:
-                    payoff += row[PRICE] * row[AMOUNT]
-                    amount_added_up += row[AMOUNT]
-                else:
-                    remaining_amount = total_provided_amount - amount_added_up
-                    payoff += row[PRICE] * remaining_amount
-                    break
-
-            return payoff
+        return payoff
