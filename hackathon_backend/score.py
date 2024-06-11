@@ -6,7 +6,7 @@ from pathlib import Path
 def to_participant(actor, mapping):
     new_actor = actor
     for aid, pid in mapping.items():
-        new_actor = actor.replace(aid, pid[0:-2])
+        new_actor = new_actor.replace(aid, pid[0:-2])
     return new_actor
 
 

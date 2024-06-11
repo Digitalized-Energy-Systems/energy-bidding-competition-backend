@@ -182,42 +182,44 @@ class Controller:
 
         for actor_id in self.unit_pool.actor_to_root.keys():
             # retrieve setpoint from awarded orders
-            for i, setpoint in enumerate(accounter.return_awarded(actor_id)):
+            setpoint = accounter.return_awarded_sum(actor_id)
 
-                # step actor
-                actor_result = self.unit_pool.step_actor(
-                    uuid=actor_id,
-                    input=UnitInput(
-                        delta_t=900,
-                        p_kw=setpoint,
-                        q_kvar=0,
-                    ),
-                    step=current_time // 900,
-                    other_inputs=[],
+            # step actor
+            actor_result = self.unit_pool.step_actor(
+                uuid=actor_id,
+                input=UnitInput(
+                    delta_t=900,
+                    p_kw=setpoint,
+                    q_kvar=0,
+                ),
+                step=current_time // 900,
+                other_inputs=[],
+            )
+            logger.info("Stepped units of actor %s... %s", actor_id, actor_result)
+
+            # store provided amount if bid was awarded
+            provided_amount_kw += actor_result.p_kw
+
+            payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
+            logger.info("Payoff for actor %s... %s", actor_id, payoff)
+
+            # Award the correct accounts
+            for i, agents in enumerate(accounter.return_awarded_agents(actor_id)):
+                payoff_part = payoff * (
+                    accounter.return_awarded(actor_id)[i] / setpoint
                 )
-                logger.info("Stepped units of actor %s... %s", actor_id, actor_result)
+                agent_key = str(agents)
+                if len(agents) == 1:
+                    agent_key = list(agents)[0]
 
-                # store provided amount if bid was awarded
-                if setpoint > 0:
-                    provided_amount_kw += actor_result.p_kw
-
-                    payoff = accounter.calculate_payoff(actor_id, actor_result.p_kw)
-                    logger.info("Payoff for actor %s... %s", actor_id, payoff)
-
-                    # Award the correct account
-                    agents = accounter.return_awarded_agents(actor_id, i)
-                    agent_key = str(agents)
-                    if len(agents) == 1:
-                        agent_key = list(agents)[0]
-
-                    # store transaction in account
-                    if not agent_key in self.actor_accounts:
-                        self.actor_accounts[agent_key] = Account()
-                    self.actor_accounts[agent_key].add_transaction(
-                        awarded_amount=setpoint,
-                        provided_power=actor_result.p_kw,
-                        payoff=payoff,
-                    )
+                # store transaction in account
+                if not agent_key in self.actor_accounts:
+                    self.actor_accounts[agent_key] = Account()
+                self.actor_accounts[agent_key].add_transaction(
+                    awarded_amount=setpoint,
+                    provided_power=actor_result.p_kw,
+                    payoff=payoff_part,
+                )
 
         self.general_demand.notify_supply(
             tender_amount_kw=tender_amount_kw, provided_amount_kw=provided_amount_kw

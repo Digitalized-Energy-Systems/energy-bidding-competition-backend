@@ -47,17 +47,23 @@ class ElectricityAskAuctionAccounter:
             )
         return agent_dataframes
 
+    def return_awarded_sum(self, agent):
+        if self.result is None or agent not in self.awarded_orders:
+            return 0
+
+        return self.awarded_orders[agent][AMOUNT].sum()
+
     def return_awarded(self, agent):
         if self.result is None or agent not in self.awarded_orders:
             return []
 
         return self.awarded_orders[agent][AMOUNT]
 
-    def return_awarded_agents(self, agent, index):
+    def return_awarded_agents(self, agent):
         if self.result is None or agent not in self.awarded_orders:
-            raise Exception()
+            return []
 
-        return self.awarded_orders[agent][AGENTS][index]
+        return self.awarded_orders[agent][AGENTS]
 
     def calculate_payoff(self, agent, total_provided_amount):
         if self.result is None or agent not in self.awarded_orders:
