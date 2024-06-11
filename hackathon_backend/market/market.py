@@ -27,7 +27,7 @@ class Market:
         self.auctions = {}
         self.open_auctions = []
         self.current_auction_results = []
-        self.expired_auctions = {}
+        self.expired_auctions = []
 
     def step(self):
         current_time = self.inputs.now_dt.timestamp()
@@ -45,7 +45,7 @@ class Market:
             elif auction.status == "closed":
                 self.current_auction_results.append(auction.result)
             elif auction.status == "expired":
-                self.expired_auctions[auction_id] = auction
+                self.expired_auctions.append(auction)
                 del self.auctions[auction_id]
 
     def receive_auction(self, new_auction):

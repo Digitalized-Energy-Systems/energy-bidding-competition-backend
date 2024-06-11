@@ -46,7 +46,7 @@ class AuctionData(BaseModel):
 class MarketData(BaseModel):
     auctions: Dict[str, AuctionData]
     open_auctions: List[AuctionData]
-    expired_auctions: Dict[str, AuctionData]
+    expired_auctions: List[AuctionData]
     current_auction_results: List[AuctionResult]
 
 
@@ -130,7 +130,7 @@ def _as_state(controller: Controller) -> ControllerData:
         market=MarketData(
             auctions=to_auction_data_dict(controller.market.auctions),
             open_auctions=to_auction_data_list(controller.market.open_auctions),
-            expired_auctions=to_auction_data_dict(controller.market.expired_auctions),
+            expired_auctions=to_auction_data_list(controller.market.expired_auctions),
             current_auction_results=controller.market.current_auction_results,
         ),
         unit_pool=UnitPoolData(
