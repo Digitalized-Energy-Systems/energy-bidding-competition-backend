@@ -1,11 +1,6 @@
 {
     "participants": [
-        "Admin123",
-        "JanMalin41",
-        "FraukeJens56",
-        "JuliaSanja39",
-        "StefanieMartin33",
-        "EmiliePauline09"
+        "Admin123"
     ],
     "rt_step_duration_s": 10,
     "rt_step_init_delay_s": 30,
