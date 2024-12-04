@@ -3,7 +3,7 @@
         "Student123"
     ],
     "rt_step_duration_s": 10,
-    "rt_step_init_delay_s": 30,
+    "rt_step_init_delay_s": 5,
     "pause": false,
     "max_steps": 96,
     "test_mode": true

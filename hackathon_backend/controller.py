@@ -159,7 +159,7 @@ class Controller:
         self.market.inputs = market_inputs
 
         tender_amount = round(
-            len(self.registered)
+            max(1, len(self.registered))
             * self.general_demand.step(None, current_time // step_size).p_kw,
             1,
         )

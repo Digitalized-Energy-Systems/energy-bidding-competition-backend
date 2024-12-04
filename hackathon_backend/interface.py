@@ -1,4 +1,5 @@
 import time
+import logging
 from typing import List
 from fastapi import APIRouter, HTTPException
 from hackathon_backend.controller import Controller, ControlException
@@ -13,6 +14,7 @@ score_handler = CsvScoreHandler(time.time())
 controller.add_after_step_hook(lambda controller: persistence_handler.write(controller))
 controller.add_after_step_hook(lambda controller: score_handler.write(controller))
 
+logger = logging.getLogger(__name__)
 
 @router.post("/hackathon/register")
 @router.post("/hackathon/register/")
