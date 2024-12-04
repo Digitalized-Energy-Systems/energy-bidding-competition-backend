@@ -1,13 +1,10 @@
 import json
-from pydantic.dataclasses import dataclass
 from pydantic import BaseModel
 from typing import List
 
 
 DEFAULT_CONFIG_FILE = "config.json"
 
-
-@dataclass
 class Config(BaseModel):
     participants: List[str]
     rt_step_duration_s: float
