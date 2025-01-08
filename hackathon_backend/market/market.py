@@ -30,7 +30,7 @@ class Market:
         self.expired_auctions = []
 
     def step(self):
-        current_time = self.inputs.now_dt.timestamp()
+        current_time = self.inputs.now_dt
 
         # Update auction data
         self.open_auctions = []

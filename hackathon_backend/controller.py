@@ -151,9 +151,7 @@ class Controller:
         :param current_time: Current time in seconds (TODO align to time modelling)
         """
         market_inputs = MarketInputs()
-        market_inputs._now_dt = datetime.datetime.fromtimestamp(
-            current_time
-        )  # TODO insert correct time
+        market_inputs._now_dt = current_time  # TODO insert correct time
         step_size = 900
         market_inputs.step_size = step_size
         self.market.inputs = market_inputs
