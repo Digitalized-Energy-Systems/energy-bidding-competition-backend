@@ -4,13 +4,11 @@ This is the backend of a market and unit simulation environment. This environmen
 
 ## Install dependencies
 ```bash
-pip install poetry
-poetry install
+pip install .
 ```
 
 ## Start server (might need to used chmod +x before)
 ```bash
-poetry shell
 uvicorn hackathon_backend.main:app --host 0.0.0.0 --port 8000 --reload --log-config=log_conf.yaml
 ```
 
