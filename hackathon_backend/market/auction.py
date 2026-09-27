@@ -3,10 +3,22 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 from typing import List
 import datetime
+import math
 import uuid
 import logging
 
 logger = logging.getLogger(__name__)
+
+AMOUNT_TOLERANCE_KW = 1e-9
+# an agent may take part in at most this many orders of one auction (solo
+# orders and group orders count alike), which bounds the order list an
+# actor can create
+MAX_ORDERS_PER_AGENT = 10
+
+
+class OrderError(Exception):
+    """Raised by place_order for an invalid order; the message is meant for
+    the client."""
 
 
 class AuctionParameters(BaseModel):
@@ -63,51 +75,72 @@ class Auction(ABC):
 
     @abstractmethod
     def place_order(self, amount_kw, price_ct, agents):
-        """Place an order in the auction"""
+        """Validate and store an order.
 
-
-class ElectricityAskAuction(Auction):
-    """Auction at which market players can sell electricity"""
-
-    def __init__(self, params: AuctionParameters, current_time=None):
-        super().__init__(params, current_time)
-        # container for all orders (only one type of order in this case)
-        self.order_container = OrderContainer()
-
-        # set auction status
-        self.update_status(current_time)
-
-    def step(self, current_time):
-        # perform actions
-        if self.status == "open" and current_time >= self.params.gate_closure_time:
-            self.clear()
-
-        self.update_status(current_time)
-
-    def place_order(self, amount_kw, price_ct, agents):
+        Every agent must be listed once with its own finite, positive amount;
+        the total must lie between the minimum order amount and the tender;
+        the price must be a finite number of at least 0 (it is capped at the
+        maximum price). Non-finite values would poison the clearing (an
+        infinite amount awards NaN to every order) and a negative price
+        would turn a shortfall into a payout.
+        """
+        if self.status != "open":
+            raise OrderError("Order not valid, the auction is not open!")
+        agents = list(agents)
+        amount_kw = list(amount_kw)
+        if len(agents) == 0 or len(agents) != len(amount_kw):
+            raise OrderError(
+                "Order not valid, agents and amount_kw must have the same, "
+                "non-zero length!"
+            )
+        if len(set(agents)) != len(agents):
+            raise OrderError("Order not valid, an agent is listed more than once!")
+        try:
+            amounts_ok = all(math.isfinite(a) and a > 0 for a in amount_kw)
+            price_ok = math.isfinite(price_ct) and price_ct >= 0
+        except TypeError:
+            raise OrderError("Order not valid, amount_kw and price_ct must be numbers!")
+        if not amounts_ok:
+            raise OrderError(
+                "Order not valid, every amount_kw must be a finite number "
+                "greater than 0!"
+            )
+        if not price_ok:
+            raise OrderError(
+                "Order not valid, the price_ct must be a finite number of at least 0!"
+            )
         # limit order price
-        if price_ct > self.params.maximum_price_ct:
-            price_ct = self.params.maximum_price_ct
-        # place order
-        if (
-            self.status == "open"
-            and sum(amount_kw) >= self.params.minimum_order_amount_kw
-        ):
-            # create order object
-            order = Order(
-                auction_id=self.id,
-                amount_kw=amount_kw,
-                price_ct=price_ct,
-                agents=agents,
+        price_ct = min(price_ct, self.params.maximum_price_ct)
+        total_amount_kw = sum(amount_kw)
+        # a small tolerance covers float sums of group orders
+        if total_amount_kw < self.params.minimum_order_amount_kw - AMOUNT_TOLERANCE_KW:
+            raise OrderError(
+                "Order not valid, the amount_kw is below the minimum order amount "
+                f"({self.params.minimum_order_amount_kw} kW)!"
             )
-            # store order
-            self.order_container.add_order(order)
+        if total_amount_kw > self.params.tender_amount_kw + AMOUNT_TOLERANCE_KW:
+            raise OrderError(
+                "Order not valid, the amount_kw is above the tender amount "
+                f"({self.params.tender_amount_kw} kW)!"
+            )
+        for agent in agents:
+            orders_of_agent = sum(
+                1 for order in self.order_container.orders if agent in order.agents
+            )
+            if orders_of_agent >= MAX_ORDERS_PER_AGENT:
+                raise OrderError(
+                    f"Order not valid, an agent may take part in at most "
+                    f"{MAX_ORDERS_PER_AGENT} orders of one auction!"
+                )
 
-            logger.info(f"Auction {self.id}: Received and stored order {order}")
-        else:
-            raise Exception(
-                "Order not valid, the amount_kw is below the allowed minimum or the auction is not open!"
-            )
+        order = Order(
+            auction_id=self.id,
+            amount_kw=amount_kw,
+            price_ct=price_ct,
+            agents=agents,
+        )
+        self.order_container.add_order(order)
+        logger.info(f"Auction {self.id}: Received and stored order {order}")
 
     def update_status(self, current_time):
         if current_time is None:
@@ -134,40 +167,37 @@ class ElectricityAskAuction(Auction):
     def clear(self):
         # sort orders by price
         self.order_container.orders.sort(key=lambda x: x.price_ct)
-        # find awarded orders
+        # find awarded orders: an order only receives power while the tender
+        # is not filled yet, so an exactly filled tender never awards a
+        # further order 0 kW (which would also set the clearing price)
+        epsilon = 1e-9
         awarded_orders = []
         total_awarded_amount = 0
         for order in self.order_container.orders:
-            if (
-                total_awarded_amount + sum(order.amount_kw)
-                < self.params.tender_amount_kw
-            ):
-                awarded_orders.append(
-                    AwardedOrder(
-                        auction_id=order.auction_id,
-                        amount_kw=order.amount_kw,
-                        price_ct=order.price_ct,
-                        agents=order.agents,
-                        awarded_amount_kw=order.amount_kw,
-                    )
-                )
-                total_awarded_amount += sum(order.amount_kw)
-            else:
-                remaining = self.params.tender_amount_kw - total_awarded_amount
-                awarded_orders.append(
-                    AwardedOrder(
-                        auction_id=order.auction_id,
-                        amount_kw=order.amount_kw,
-                        price_ct=order.price_ct,
-                        agents=order.agents,
-                        awarded_amount_kw=[
-                            amount_kw / sum(order.amount_kw) * remaining
-                            for amount_kw in order.amount_kw
-                        ],
-                    )
-                )
+            remaining = self.params.tender_amount_kw - total_awarded_amount
+            if remaining <= epsilon:
                 break
-        # find clearing price
+            order_amount_kw = sum(order.amount_kw)
+            if order_amount_kw <= remaining:
+                # full award
+                awarded_amount_kw = list(order.amount_kw)
+            else:
+                # partial award, split proportionally by amount_kw
+                awarded_amount_kw = [
+                    amount_kw / order_amount_kw * remaining
+                    for amount_kw in order.amount_kw
+                ]
+            awarded_orders.append(
+                AwardedOrder(
+                    auction_id=order.auction_id,
+                    amount_kw=order.amount_kw,
+                    price_ct=order.price_ct,
+                    agents=order.agents,
+                    awarded_amount_kw=awarded_amount_kw,
+                )
+            )
+            total_awarded_amount += sum(awarded_amount_kw)
+        # find clearing price: price of the last order that received power
         if len(awarded_orders) == 0:
             clearing_price = None
         else:

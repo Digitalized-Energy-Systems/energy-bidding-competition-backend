@@ -3,9 +3,15 @@ from hackathon_backend.market.auction import AuctionResult
 import pandas as pd
 
 AMOUNT = "Amount in kW"
-TOTAL_AMOUNT = "Total Order-amount in kW"
 PRICE = "Price in ct per kW"
-AGENTS = "Agents providing the kW"
+
+# Penalty rate in ct per kW and quarter hour (a quarter of the price cap of
+# 1000 ct). Power drawn from the grid is charged at this rate (see
+# Controller.step_units), and awarded but not provided power (a shortfall)
+# is charged at the order price but at least at this rate, so that not
+# delivering is never free: an order at 0 ct which blocks the tender still
+# pays for its shortfall.
+PENALTY_CT_PER_KW = 1000 / 4
 
 
 class ElectricityAskAuctionAccounter:
@@ -16,6 +22,9 @@ class ElectricityAskAuctionAccounter:
 
     def _generate_agent_dataframes(self, ascending=True):
         agent_dataframes = {}
+        # one dataframe per agent with the agent's OWN awarded share of every
+        # order (a group order yields one row per member); there is no
+        # joint account
         for awarded_order in self.result.awarded_orders:
             agents = awarded_order.agents
             for i, agent in enumerate(agents):
@@ -29,8 +38,6 @@ class ElectricityAskAuctionAccounter:
                             [
                                 {
                                     AMOUNT: awarded_order.awarded_amount_kw[i],
-                                    TOTAL_AMOUNT: sum(awarded_order.awarded_amount_kw),
-                                    AGENTS: set(agents),
                                     PRICE: awarded_order.price_ct,
                                 }
                             ]
@@ -53,29 +60,23 @@ class ElectricityAskAuctionAccounter:
 
         return self.awarded_orders[agent][AMOUNT].sum()
 
-    def return_awarded(self, agent):
-        if self.result is None or agent not in self.awarded_orders:
-            return []
-
-        return self.awarded_orders[agent][AMOUNT]
-
-    def return_awarded_agents(self, agent):
-        if self.result is None or agent not in self.awarded_orders:
-            return []
-
-        return self.awarded_orders[agent][AGENTS]
-
     def calculate_payoff(self, agent, total_provided_amount):
         if self.result is None or agent not in self.awarded_orders:
             return 0
         
+        # the provided power fills the actor's orders from the cheapest one
+        # on; the shortfall of every order is charged at its price, but at
+        # least at the penalty rate
         awarded_amount_added_up = 0
         payoff = 0
         for _, row in self.awarded_orders[agent].iterrows():
-            order_provided_amount = max(min(row[AMOUNT], total_provided_amount - awarded_amount_added_up), 0)
+            order_provided_amount = max(
+                min(row[AMOUNT], total_provided_amount - awarded_amount_added_up), 0
+            )
+            shortfall = row[AMOUNT] - order_provided_amount
             payoff += row[PRICE] * order_provided_amount
-            payoff -= row[PRICE] * (row[AMOUNT] - order_provided_amount)
-            
+            payoff -= max(row[PRICE], PENALTY_CT_PER_KW) * shortfall
+
             awarded_amount_added_up = row[AMOUNT] + awarded_amount_added_up
 
         return payoff

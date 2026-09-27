@@ -12,6 +12,7 @@ from hackathon_backend.market.auction import (
     Order,
     OrderContainer,
 )
+from hackathon_backend.market.cooperative import CooperativeBid, CooperativeBidPool
 from hackathon_backend.accounting.account import AccountData
 
 from hackathon_backend.units.vpp import VPP
@@ -61,6 +62,7 @@ class ControllerData(BaseModel):
     unit_pool: UnitPoolData
     step: int
     actor_account_data: Dict[str, AccountData]
+    cooperative_bids: List[CooperativeBid] = []
 
 
 def _to_unit(unit_information: Dict):
@@ -107,11 +109,15 @@ def to_auction_data_list(auctions: List[Auction]):
 
 def from_auction_data(auction_data: AuctionData):
     auction = ElectricityAskAuction(auction_data.params)
+    # keep the persisted identity: the constructor draws a fresh uuid, but
+    # the orders, the keys of market.auctions and the cooperative bids
+    # reference the auction by its persisted id
+    auction.id = auction_data.id
     container = OrderContainer()
     container.orders = auction_data.orders
     auction.order_container = container
     auction.status = auction_data.status
-    auction.result = auction.result
+    auction.result = auction_data.result
     return auction
 
 
@@ -141,6 +147,7 @@ def _as_state(controller: Controller) -> ControllerData:
         ),
         step=controller.step,
         actor_account_data=to_actor_account_datas(controller.actor_accounts),
+        cooperative_bids=controller.cooperative_bids.all_bids(),
     )
 
 
@@ -164,6 +171,7 @@ def _load_state(controller_data: ControllerData) -> Controller:
     )
     controller.config = controller_data.config
     controller.registered = controller_data.registered
+    controller.cooperative_bids = CooperativeBidPool(controller_data.cooperative_bids)
     return controller
 
 

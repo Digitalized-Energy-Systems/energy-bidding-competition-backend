@@ -1,6 +1,6 @@
 import time
 import logging
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from hackathon_backend.controller import Controller, ControlException
 from hackathon_backend.persistence import JsonPersistenceHandler
@@ -101,6 +101,61 @@ async def read_auction_result(actor_id: str):
         raise HTTPException(e.code, e.message)
 
 
+@router.post("/market/cooperative/propose")
+@router.post("/market/cooperative/propose/")
+async def propose_cooperative_bid(
+    actor_id: str,
+    amount_kw: float,
+    price_ct: float,
+    supply_time: int,
+    target_amount_kw: Optional[float] = None,
+):
+    try:
+        bid = await controller.propose_cooperative_bid(
+            actor_id, amount_kw, price_ct, supply_time, target_amount_kw
+        )
+        return {"cooperative_bid": bid.to_dict()}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.post("/market/cooperative/join")
+@router.post("/market/cooperative/join/")
+async def join_cooperative_bid(
+    actor_id: str, cooperative_bid_id: str, amount_kw: float
+):
+    try:
+        bid, accepted_amount_kw = await controller.join_cooperative_bid(
+            actor_id, cooperative_bid_id, amount_kw
+        )
+        return {
+            "cooperative_bid": bid.to_dict(),
+            "accepted_amount_kw": accepted_amount_kw,
+        }
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.get("/market/cooperative/open")
+@router.get("/market/cooperative/open/")
+async def read_open_cooperative_bids(supply_time: Optional[int] = None):
+    try:
+        bids = await controller.return_open_cooperative_bids(supply_time)
+        return {"cooperative_bids": [bid.to_dict() for bid in bids]}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.get("/market/cooperative/mine")
+@router.get("/market/cooperative/mine/")
+async def read_cooperative_bids_of_actor(actor_id: str):
+    try:
+        bids = await controller.return_cooperative_bids_of_actor(actor_id)
+        return {"cooperative_bids": [bid.to_dict() for bid in bids]}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
 @router.get("/account/balances")
 @router.get("/account/balances/")
 async def read_balances():
@@ -134,6 +189,22 @@ async def load_from_file():
 async def read_results():
     try:
         return {"results": await controller.return_auction_results()}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.get("/ui/cooperative")
+@router.get("/ui/cooperative/")
+async def read_cooperative_bids_ui():
+    # never raises for the toggle; the config is read at call time
+    if not controller.config.cooperative_bidding:
+        return {"enabled": False, "cooperative_bids": []}
+    try:
+        bids = await controller.return_all_cooperative_bids()
+        return {
+            "enabled": True,
+            "cooperative_bids": [bid.to_dict() for bid in bids],
+        }
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 

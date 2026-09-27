@@ -8,3 +8,5 @@ app_state.json
 dgh-backend.log
 *.csv
 results/
+build/
+*.egg-info

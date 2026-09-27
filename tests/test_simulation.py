@@ -118,5 +118,11 @@ async def test_simulation_loop_group_order_phase_2(setup_controller):
     async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.get("/account/balances")
 
-    # THEN
-    assert round(list(response.json().items())[2][1]) == 3
+    # THEN the awarded group order is credited to the members' own accounts:
+    # the balances dict holds exactly the two registered actors, no joint key
+    balances = response.json()
+    assert response.status_code == 200
+    assert set(balances.keys()) == {
+        register_resultA["actor_id"],
+        register_resultB["actor_id"],
+    }
