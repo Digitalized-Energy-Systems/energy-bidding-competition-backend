@@ -1,6 +1,5 @@
-import time
 import math
-from hackathon_backend.units.pool import allocate_default_actor_units
+import pytest
 from hackathon_backend.units.unit import UnitInput
 from hackathon_backend.units.vpp import VPP
 from hackathon_backend.units.load import create_demand
@@ -22,16 +21,14 @@ def test_vpp_over_time():
     # create irradiance profile from cosine values
     pv_profile_day = [1000*(1-s)/2 for s in cos_values]
     vpp.add_unit(create_pv_unit("pb0", pv_profile_day))
-    vpp.add_unit(create_battery("b0",cap_kwh=12, p_charge_max_kw=2, p_discharge_max_kw=2, initial_soc=50))
-    
-    print(vpp)
+    battery = create_battery("b0",cap_kwh=12, p_charge_max_kw=2, p_discharge_max_kw=2, initial_soc=50)
+    vpp.add_unit(battery)
+    reference_pv = create_pv_unit("pv", pv_profile_day)
 
-    global_demand_size = local_demand_size / 3
-    
     # WHEN
-    energy_sum = 0.0
+    energy_sum_kwh = 0.0
+    soc_percent = []
     for i in range(96):
-        # result = vpp.sub_units["pb0"].step(
         result = vpp.step(
             input=UnitInput(
                 delta_t=900,
@@ -40,22 +37,13 @@ def test_vpp_over_time():
             ),
             step=i
         )
-        print(vpp.read_information().unit_information_list[2])
-        print(result.p_kw)
-        # energy_sum += result.p_kw/4
-    # print(energy_sum)
-    # # Add the units to the VPP
-    # vpp.add_unit(unit1)
-    # vpp.add_unit(unit2)
-    # vpp.add_unit(unit3)
+        # THEN the battery balances PV and load in every step of a clear day
+        assert result.p_kw == pytest.approx(0, abs=1e-9)
+        soc_percent.append(battery._midas_battery.state.soc_percent)
+        pv_kw = -reference_pv.step(UnitInput(900, 0, 0), i).p_kw
+        energy_sum_kwh += (pv_kw - local_demand_size) / 4
 
-    # # Run the VPP and units over time
-    # for i in range(10):
-    #     vpp.run()
-    #     unit1.run()
-    #     unit2.run()
-    #     unit3.run()
-    #     time.sleep(1)  # Sleep for 1 second between each iteration
-
-        # Assert any conditions you want to test here
-    assert 0 == 1
+    # THEN it never runs empty or full, and the energy balance of the day ends
+    # up in the battery
+    assert 0 < min(soc_percent) and max(soc_percent) < 100
+    assert soc_percent[-1] == pytest.approx(50 + 100 * energy_sum_kwh / 12)

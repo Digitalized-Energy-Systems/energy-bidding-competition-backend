@@ -1,15 +1,18 @@
 import asyncio
 import math
+import secrets
 import traceback
 import logging
 import time, datetime
-from typing import List
+from typing import List, Optional
+import numpy as np
 import pandas as pd
 from pydantic.dataclasses import dataclass
 from .units.pool import UnitPool, allocate_default_actor_units
 from .units.unit import UnitInput
+from .units.weather import pv_irradiance_profile
 from .market.market import Market, MarketInputs
-from .market.auction import initiate_electricity_ask_auction
+from .market.auction import MAX_ORDERS_PER_AGENT, initiate_electricity_ask_auction
 from .market.cooperative import (
     CooperativeBid,
     CooperativeBidError,
@@ -20,7 +23,7 @@ from .market.cooperative import (
 from .market.tender import (
     supply_step_from_time,
     cooperative_minimum_order_amount_kw,
-    cooperative_tender_amount_kw,
+    plain_minimum_order_amount_kw,
 )
 from hackathon_backend.units.pool import (
     UnitInformation,
@@ -31,8 +34,10 @@ from hackathon_backend.accounting.accounter import (
     ElectricityAskAuctionAccounter as Accounter,
 )
 from hackathon_backend.accounting.account import Account
-from hackathon_backend.general_demand import create_general_demand
-from hackathon_backend.config import Config, load_config
+from hackathon_backend.general_demand import create_general_demand, demand_per_actor_profile
+from hackathon_backend.optimum import central_optimum
+from hackathon_backend.config import Config, ParticipantEntry, load_config
+from hackathon_backend.registration_keys import RegistrationKeys
 
 SIMULATION_TIME_SECONDS_PER_STEP = 900
 # an auction created at time t supplies at t + 4500 s (5 steps later), see
@@ -42,6 +47,7 @@ ELECTRICITY = "electricity"
 # number of cooperative bids returned to the ui
 UI_MAX_COOPERATIVE_BIDS = 50
 AMOUNT_TOLERANCE_KW = 1e-9
+MAX_PARTICIPANT_NAME_LENGTH = 32
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +82,9 @@ class Controller:
       - return full results for gui
     """
 
-    def __init__(self, config_file="config.json"):
+    def __init__(
+        self, config_file="config.json", registration_keys_file="registration_keys.json"
+    ):
         self.market = Market()
         self.unit_pool = UnitPool()
         self.registration_open = True
@@ -93,7 +101,20 @@ class Controller:
         self.after_step_hooks = []
         self.remaining_sleep = 0
         self.actor_to_participant = {}
+        # participant id -> name shown in the ranking
+        self.participant_names = {}
+        # one row per actor and unit step, for analysis (see plot.py)
+        self.actor_history = []
+        self._dispatch_cache = None
         self.cooperative_bids = CooperativeBidPool()
+        self.registration_keys = RegistrationKeys(registration_keys_file)
+        self.set_pv_seed(self.config.pv_seed)
+
+    def set_pv_seed(self, pv_seed: Optional[int]):
+        """Weather of the day: one PV profile shared by all actors, a new one
+        every run unless the seed is configured (or restored on load)."""
+        self.pv_seed = secrets.randbits(32) if pv_seed is None else pv_seed
+        self.pv_profile = pv_irradiance_profile(self.pv_seed)
 
     def init(self):
         logger.info("Init controller...")
@@ -113,17 +134,34 @@ class Controller:
             await asyncio.sleep(remaining_time)
             self.remaining_sleep = 0
 
+    def _reload_config(self):
+        """Re-read the config file, keeping the last good config if it cannot
+        be read (e.g. an editor saving it right now); stepping must never
+        stop because of it."""
+        try:
+            self.config = load_config(self.config_file)
+        except Exception as e:
+            logger.warning("Keeping the last good config, %s is unreadable: %s", self.config_file, e)
+
+    def _run_after_step_hooks(self):
+        for hook in self.after_step_hooks:
+            try:
+                hook(self)
+            except Exception:
+                logger.exception("An after-step hook failed")
+
     async def initiate_stepping(self):
         try:
             logger.info(f"Delay finished, starting the loop...")
-            self.config = load_config(self.config_file)
-            self.general_demand = create_general_demand("gd0")
+            self._reload_config()
+            if self.general_demand is None:
+                self.general_demand = create_general_demand("gd0")
             await self._sleep_with_info_update(self.config.rt_step_init_delay_s)
 
             while True:
-                self.config = load_config(self.config_file)
-                while self.config.pause or self.step == self.config.max_steps:
-                    self.config = load_config(self.config_file)
+                self._reload_config()
+                while self.config.pause or self.step >= self.config.max_steps:
+                    self._reload_config()
                     self.remaining_sleep = -1
                     await asyncio.sleep(1)
                     self.remaining_sleep = 0
@@ -137,11 +175,14 @@ class Controller:
                 )
                 await self._sleep_with_info_update(self.config.rt_step_duration_s)
                 self.current_unit_task = asyncio.create_task(self.loop_units(self.step))
+                # the hooks persist the state, which must include this settlement
+                await self.check_unit_step_done()
                 logger.info("Step finished... %s", self.step)
                 self.step += 1
 
-                for hook in self.after_step_hooks:
-                    hook(self)
+                self._run_after_step_hooks()
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.exception("The main loop crashed!")
 
@@ -177,40 +218,35 @@ class Controller:
         market_inputs.step_size = step_size
         self.market.inputs = market_inputs
 
-        # the general demand is stepped in every mode (it tracks its time step)
-        general_demand_kw = self.general_demand.step(
-            None, current_time // step_size
-        ).p_kw
+        # the demand per actor of the auction's supply interval
+        general_demand_kw = demand_per_actor_profile(self.config.demand_per_actor_kw)[
+            supply_step_from_time(current_time + AUCTION_SUPPLY_OFFSET_S)
+        ]
 
-        # the tender scales with the registered actors in both modes, so it
-        # fits the generation and flexibility they bring
-        demand_tender_kw = round(
-            max(1, len(self.registered)) * general_demand_kw,
-            1,
-        )
+        # the tender is the demand of the registered actors, in both modes
+        # (see market/tender.py)
+        tender_amount = round(max(1, len(self.registered)) * general_demand_kw, 1)
         if self.config.cooperative_bidding:
-            # cooperative bidding: the minimum order amount follows the
-            # profile of market/tender.py, which a single actor can only
-            # reach alone for about half of the day; the tender is the plain
-            # tender floored at minimum / share, so the minimum is never more
-            # than that share of the tender
-            supply_step = supply_step_from_time(current_time + AUCTION_SUPPLY_OFFSET_S)
-            minimum_order_amount_kw = cooperative_minimum_order_amount_kw(supply_step)
-            tender_amount = cooperative_tender_amount_kw(
-                supply_step, demand_tender_kw, self.config.cooperative_min_order_share
+            minimum_order_amount_kw = cooperative_minimum_order_amount_kw(
+                tender_amount, self.config.cooperative_minimum_order_kw
             )
         else:
-            minimum_order_amount_kw = 1.0
-            tender_amount = demand_tender_kw
-
-        # insert new acution into market
-        self.market.receive_auction(
-            initiate_electricity_ask_auction(
-                current_time,
-                tender_amount=tender_amount,
-                minimum_order_amount_kw=minimum_order_amount_kw,
+            minimum_order_amount_kw = plain_minimum_order_amount_kw(
+                tender_amount, self.config.plain_minimum_order_kw
             )
-        )
+
+        # an auction whose supply lies after the last step would never be
+        # settled
+        supply_start_time = current_time + AUCTION_SUPPLY_OFFSET_S
+        if supply_start_time < self.config.max_steps * SIMULATION_TIME_SECONDS_PER_STEP:
+            self.market.receive_auction(
+                initiate_electricity_ask_auction(
+                    current_time,
+                    tender_amount=tender_amount,
+                    minimum_order_amount_kw=minimum_order_amount_kw,
+                    maximum_price_ct=self.config.maximum_price_ct,
+                )
+            )
         self.market.step()
 
         # cooperative bids which did not reach their target until the gate
@@ -224,7 +260,10 @@ class Controller:
         market_results = self.market.get_current_auction_results()
         auction_result = market_results.get(f"{current_time}_electricity", None)
         # accounter = None
-        accounter = Accounter(auction_result=auction_result)
+        accounter = Accounter(
+            auction_result=auction_result,
+            shortfall_penalty_ct_per_kw=self.config.shortfall_penalty_ct_per_kw,
+        )
         # retrieve tender_amount
         if auction_result is not None:
             tender_amount_kw = auction_result.params.tender_amount_kw
@@ -275,13 +314,27 @@ class Controller:
                     payoff=payoff,
                 )
 
-            penalty_ct = 1000 / 4  # 30 ct per quarterhour
+            grid_penalty_ct = 0.0
             if actor_result.p_kw < 0:
+                grid_penalty_ct = actor_result.p_kw * self.config.grid_penalty_ct_per_kw
                 account.add_transaction(
                     awarded_amount=0,
                     provided_power=actor_result.p_kw,
-                    payoff=actor_result.p_kw * penalty_ct,
+                    payoff=grid_penalty_ct,
                 )
+
+            self.actor_history.append(
+                {
+                    "step": int(current_time // 900),
+                    "actor_id": actor_id,
+                    "awarded_kw": float(setpoint),
+                    "delivered_kw": float(actor_result.p_kw),
+                    **self.unit_pool.actor_to_root[actor_id].breakdown(),
+                    "payoff_ct": float(payoff),
+                    "grid_penalty_ct": float(grid_penalty_ct),
+                    "balance_ct": float(account.get_balance()),
+                }
+            )
 
         self.general_demand.notify_supply(
             tender_amount_kw=tender_amount_kw, provided_amount_kw=provided_amount_kw
@@ -300,36 +353,120 @@ class Controller:
             if p == part_id:
                 return a
 
-    async def register_actor(self, participant_id: str) -> List[UnitInformation]:
+    async def issue_registration_key(self, name: str, client_ip: Optional[str]) -> str:
+        if not self.config.issue_registration_keys:
+            raise ControlException(
+                403, "Registration keys are handed out by the organizers!"
+            )
+        if not self.registration_open:
+            raise ControlException(405, "Registration is closed!")
+        if client_ip is None:
+            raise ControlException(400, "The client address is unknown!")
+        name = name.strip()
+        if not 0 < len(name) <= MAX_PARTICIPANT_NAME_LENGTH or not name.isprintable():
+            raise ControlException(
+                400,
+                f"The name must have 1 to {MAX_PARTICIPANT_NAME_LENGTH} printable "
+                "characters!",
+            )
+        if self.registration_keys.count_for_ip(client_ip) >= self.config.max_keys_per_ip:
+            raise ControlException(
+                409, "A registration key has already been issued to your address!"
+            )
+        taken_names = self.registration_keys.names() + [
+            configured_name for _, _, configured_name in self._configured_participants()
+        ]
+        if name.casefold() in {taken.casefold() for taken in taken_names}:
+            raise ControlException(409, "The name is already taken!")
+
+        key = self.registration_keys.issue(name, client_ip)
+        logger.info("Issued a registration key for %s to %s", name, client_ip)
+        return key
+
+    def _configured_participants(self):
+        """(participant id, key, display name) of the participants in the
+        config file."""
+        for entry in self.config.participants:
+            if isinstance(entry, ParticipantEntry):
+                yield f"config:{entry.name}", entry.key, entry.name
+            else:
+                # a legacy id is its own key and is shown without its last
+                # two characters
+                yield entry, entry, entry[0:-2]
+
+    def _resolve_participant(self, key: str):
+        """(participant id, display name) of a registration key, or None."""
+        for participant_id, participant_key, name in self._configured_participants():
+            if secrets.compare_digest(key.encode(), participant_key.encode()):
+                return participant_id, name
+        issued = self.registration_keys.get(key)
+        if issued is not None:
+            return issued.participant_id, issued.name
+        return None
+
+    def _authenticate(self, actor_id, key):
+        """The actor id is public: acting for an actor or reading its private
+        state requires the registration key the actor registered with."""
+        self._check_actor_exists(actor_id)
+        resolved = None if key is None else self._resolve_participant(key)
+        if resolved is None or self.actor_to_participant.get(actor_id) != resolved[0]:
+            raise ControlException(403, "The key does not belong to the actor!")
+
+    def participant_display_names(self):
+        """actor id -> name shown in the ranking (no key material)."""
+        return {
+            actor_id: self.participant_names.get(participant_id, participant_id[0:-2])
+            for actor_id, participant_id in self.actor_to_participant.items()
+        }
+
+    def check_admin_token(self, token: Optional[str]):
+        if self.config.admin_token is None:
+            raise ControlException(
+                403, "The admin endpoints are disabled, configure an admin_token!"
+            )
+        if token is None or not secrets.compare_digest(
+            token.encode(), self.config.admin_token.encode()
+        ):
+            raise ControlException(403, "The admin token is wrong!")
+
+    async def register_actor(self, key: str) -> List[UnitInformation]:
         if self.registration_open:
+            resolved = self._resolve_participant(key)
+            if resolved is None:
+                raise ControlException(403, "The requester is unknown!")
+            participant_id, name = resolved
             logger.info("Registering actor %s...", participant_id)
 
-            if participant_id in self.config.participants:
-                if participant_id in self.registered:
-                    if self.config.test_mode:
-                        aid = self._part_to_actor_id(participant_id)
-                        return aid, self.unit_pool.read_units(aid)
-                    raise ControlException(
-                        400, "The participant is already registered!"
-                    )
-                self.registered.add(participant_id)
-                logger.info("Registered actor %s...", participant_id)
-            else:
-                raise ControlException(403, "The requester is unknown!")
+            if participant_id in self.registered:
+                if self.config.test_mode:
+                    aid = self._part_to_actor_id(participant_id)
+                    return aid, self.unit_pool.read_units(aid)
+                raise ControlException(400, "The participant is already registered!")
+            self.registered.add(participant_id)
+            logger.info("Registered actor %s...", participant_id)
 
-            actor_id, root_unit = allocate_default_actor_units()
+            actor_id, root_unit = allocate_default_actor_units(
+                demand_size=self.config.actor_load_kw,
+                load_profile_kw=self.config.household_load_kw,
+                pv_profile=self.pv_profile,
+                pv_peak_kw=self.config.pv_peak_kw,
+                forecast_seed=self.pv_seed,
+                battery_capacity_kwh=self.config.battery_capacity_kwh,
+                battery_charge_max_kw=self.config.battery_charge_max_kw,
+                battery_discharge_max_kw=self.config.battery_discharge_max_kw,
+                battery_initial_soc_percent=self.config.battery_initial_soc_percent,
+            )
             self.unit_pool.insert_actor_root(actor_id, root_unit)
             self.actor_accounts[actor_id] = Account()
             self.actor_to_participant[actor_id] = participant_id
+            self.participant_names[participant_id] = name
             return actor_id, self.unit_pool.read_units(actor_id)
         else:
             raise ControlException(405, "Registration is closed!")
 
-    async def read_units(self, actor_id) -> List[UnitInformation]:
+    async def read_units(self, actor_id, key) -> List[UnitInformation]:
         await self.check_unit_step_done()
-
-        if not self.unit_pool.has_actor(actor_id):
-            raise ControlException(404, "The actor id does not exist!")
+        self._authenticate(actor_id, key)
         return self.unit_pool.read_units(actor_id)
 
     async def return_open_auction_params(self):
@@ -349,29 +486,43 @@ class Controller:
         await self.check_market_step_done()
         return self.market.current_auction_results
 
-    async def receive_order(self, actor_ids, amount_kw, price_ct, supply_time):
-        """Receive order from actor and pass it to market.
-        :param actor_id: Actor identifier
-        :param order: Order object
-        :param supply_time: Supply time of the auction (key to select auction)
+    def _check_order_slots(self, actor_ids, auction):
+        """An actor takes part in at most MAX_ORDERS_PER_AGENT orders of an
+        auction, and every open cooperative bid it is a member of reserves
+        one of them, so a filled cooperative bid can always be placed."""
+        for actor_id in actor_ids:
+            orders = sum(
+                1 for order in auction.order_container.orders if actor_id in order.agents
+            )
+            if (
+                orders + self.cooperative_bids.open_memberships(actor_id, auction.id)
+                >= MAX_ORDERS_PER_AGENT
+            ):
+                raise ControlException(
+                    400,
+                    f"An actor may take part in at most {MAX_ORDERS_PER_AGENT} "
+                    "orders of one auction, open cooperative bids included!",
+                )
+
+    async def receive_order(self, actor_id, key, amount_kw, price_ct, supply_time):
+        """Place an order of one actor in the auction of the supply time.
+        Actors pool their power only through cooperative bids (see
+        _place_cooperative_order), which every member joins itself.
         """
         await self.check_market_step_done()
-        if len(actor_ids) > 1 and self.config.cooperative_bidding:
-            # a group order books payoff and penalties on every listed
-            # actor's own account; while cooperative bidding is enabled only
-            # a cooperative bid, which every member joins itself, may create
-            # one (see _place_cooperative_order)
-            raise ControlException(
-                403,
-                "Group orders are placed through cooperative bids while "
-                "cooperative bidding is enabled, see /market/cooperative/propose "
-                "and /market/cooperative/join",
+        self._authenticate(actor_id, key)
+        auction = self.market.auctions.get(
+            self.market._get_auction_id_from_supply_time_and_product_type(
+                supply_time, ELECTRICITY
             )
+        )
+        if auction is not None:
+            self._check_order_slots([actor_id], auction)
         try:
             ok = self.market.receive_order(
-                amount_kw=amount_kw,
+                amount_kw=[amount_kw],
                 price_ct=price_ct,
-                agents=actor_ids,
+                agents=[actor_id],
                 supply_time=supply_time,
                 product_type="electricity",
             )
@@ -384,11 +535,12 @@ class Controller:
         else:
             raise ControlException(404, "The specified auction does not exist!")
 
-    async def return_awarded_orders(self, actor_id):
+    async def return_awarded_orders(self, actor_id, key):
         """Return awarded orders for actor.
         :param actor_id: Actor identifier
         """
         await self.check_market_step_done()
+        self._authenticate(actor_id, key)
 
         current_results = self.market.get_current_auction_results()
         relevant_results = {}
@@ -445,11 +597,12 @@ class Controller:
         return auction
 
     async def propose_cooperative_bid(
-        self, actor_id, amount_kw, price_ct, supply_time, target_amount_kw=None
+        self, actor_id, key, amount_kw, price_ct, supply_time, target_amount_kw=None
     ) -> CooperativeBid:
         """Open a cooperative bid for the auction supplying at supply_time
         with the proposer as first member.
         :param actor_id: Proposing actor
+        :param key: Registration key of the proposing actor
         :param amount_kw: Amount the proposer puts into the bid
         :param price_ct: Common price of the whole bid
         :param supply_time: Supply time of the auction (key to select auction)
@@ -458,7 +611,7 @@ class Controller:
         """
         await self.check_market_step_done()
         self._check_cooperative_bidding_enabled()
-        self._check_actor_exists(actor_id)
+        self._authenticate(actor_id, key)
         auction = self._find_open_auction(supply_time)
         params = auction.params
 
@@ -481,6 +634,7 @@ class Controller:
                 f"({params.minimum_order_amount_kw} kW) and the tender amount "
                 f"({params.tender_amount_kw} kW) of the auction!",
             )
+        self._check_order_slots([actor_id], auction)
 
         try:
             return self.cooperative_bids.propose(
@@ -496,17 +650,21 @@ class Controller:
         except CooperativeBidError as e:
             raise ControlException(e.code, e.message)
 
-    async def join_cooperative_bid(self, actor_id, cooperative_bid_id, amount_kw):
-        """Join an open cooperative bid. When the target is filled the
-        group order is placed in the market immediately.
+    async def join_cooperative_bid(self, actor_id, key, cooperative_bid_id, amount_kw):
+        """Join an open cooperative bid, or top up the own amount. When the
+        target is filled the group order is placed in the market immediately.
         :return: (bid, accepted_amount_kw)
         """
         await self.check_market_step_done()
         self._check_cooperative_bidding_enabled()
-        self._check_actor_exists(actor_id)
-        if self.cooperative_bids.get(cooperative_bid_id) is None:
+        self._authenticate(actor_id, key)
+        bid = self.cooperative_bids.get(cooperative_bid_id)
+        if bid is None:
             raise ControlException(404, "The cooperative bid does not exist!")
         self._check_finite(amount_kw=amount_kw)
+        auction = self.market.auctions.get(bid.auction_id)
+        if auction is not None and not bid.has_member(actor_id):
+            self._check_order_slots([actor_id], auction)
 
         try:
             bid, accepted_amount_kw = self.cooperative_bids.join(
@@ -553,11 +711,21 @@ class Controller:
         self._check_cooperative_bidding_enabled()
         return self.cooperative_bids.open_bids(supply_time=supply_time)
 
-    async def return_cooperative_bids_of_actor(self, actor_id):
+    async def withdraw_cooperative_bid(self, actor_id, key, cooperative_bid_id):
+        """Leave an open cooperative bid; the proposer cancels it."""
+        await self.check_market_step_done()
+        self._check_cooperative_bidding_enabled()
+        self._authenticate(actor_id, key)
+        try:
+            return self.cooperative_bids.withdraw(actor_id, cooperative_bid_id)
+        except CooperativeBidError as e:
+            raise ControlException(e.code, e.message)
+
+    async def return_cooperative_bids_of_actor(self, actor_id, key):
         """Cooperative bids of every status in which the actor is a member."""
         await self.check_market_step_done()
         self._check_cooperative_bidding_enabled()
-        self._check_actor_exists(actor_id)
+        self._authenticate(actor_id, key)
         return self.cooperative_bids.bids_for_actor(actor_id)
 
     async def return_all_cooperative_bids(self):
@@ -581,6 +749,110 @@ class Controller:
     async def get_gd_df(self) -> pd.DataFrame:
         await self.check_market_step_done()
         return self.general_demand.supply
+
+    def status(self):
+        return {
+            "step": self.step,
+            "max_steps": self.config.max_steps,
+            "finished": self.step >= self.config.max_steps,
+        }
+
+    async def system_dispatch(self):
+        """The actual dispatch of all teams so far next to the central
+        optimum of the same steps (see optimum.py), with the energy balance
+        of both: start charge + PV - own loads + grid draw - market demand
+        served - lost = left in the batteries. Lost is PV surplus that no
+        battery stored and nobody bought (for the teams: power delivered
+        beyond their awards). Solved once per step."""
+        await self.check_unit_step_done()
+        key = (self.step, len(self.actor_history))
+        if self._dispatch_cache is not None and self._dispatch_cache[0] == key:
+            return self._dispatch_cache[1]
+        dispatch = self._system_dispatch()
+        self._dispatch_cache = (key, dispatch)
+        return dispatch
+
+    def _system_dispatch(self):
+        status = self.status()
+        if not self.actor_history or self.general_demand is None:
+            return {**status, "steps": 0}
+        n_steps = max(row["step"] for row in self.actor_history) + 1
+        teams = list(dict.fromkeys(row["actor_id"] for row in self.actor_history))
+        index = {actor_id: i for i, actor_id in enumerate(teams)}
+        shape = (len(teams), n_steps)
+        columns = ("pv_kw", "load_kw", "awarded_kw", "delivered_kw", "battery_kw", "soc_percent")
+        rows = {name: np.zeros(shape) for name in columns}
+        active = np.zeros(shape, dtype=bool)
+        for row in self.actor_history:
+            i, t = index[row["actor_id"]], row["step"]
+            active[i, t] = True
+            for name in columns:
+                rows[name][i, t] = row[name] or 0.0
+
+        cap_kwh, charge_kw, discharge_kw = np.zeros(len(teams)), np.zeros(len(teams)), np.zeros(len(teams))
+        for actor_id, i in index.items():
+            for unit in self.unit_pool.read_units(actor_id):
+                if hasattr(unit, "cap_kwh"):
+                    cap_kwh[i] += unit.cap_kwh
+                    charge_kw[i] += unit.p_charge_max_kw
+                    discharge_kw[i] += unit.p_discharge_max_kw
+        # the charge before each team's first step, from the history rather
+        # than the config, which may have changed since the start of the day
+        first = active.argmax(axis=1)
+        teams_idx = np.arange(len(teams))
+        initial_kwh = (
+            rows["soc_percent"][teams_idx, first] / 100 * cap_kwh
+            - rows["battery_kw"][teams_idx, first] * 0.25
+        )
+
+        supply = self.general_demand.supply.sort_index()
+        demand = np.zeros(n_steps)
+        served = np.zeros(n_steps)
+        for t, (tender, provided) in enumerate(
+            zip(supply["tender_amount_kw"].astype(float), supply["provided_amount_kw"].astype(float))
+        ):
+            if t < n_steps:
+                demand[t], served[t] = tender, provided
+
+        delivered = rows["delivered_kw"]
+        actual = {
+            "served_kw": served,
+            "unserved_kw": np.maximum(demand - served, 0.0),
+            "grid_kw": np.maximum(-delivered, 0.0).sum(axis=0),
+            "lost_kw": np.maximum(delivered - np.maximum(rows["awarded_kw"], 0.0), 0.0).sum(axis=0),
+            "battery_kw": rows["battery_kw"].sum(axis=0),
+            "stored_kwh": (rows["soc_percent"] / 100 * cap_kwh[:, None]).sum(axis=0),
+        }
+        optimum = central_optimum(
+            rows["pv_kw"], rows["load_kw"], active, cap_kwh, charge_kw, discharge_kw, initial_kwh, demand
+        )
+
+        def kwh(values):
+            return round(float(np.sum(values)) * 0.25, 3)
+
+        def summary(result):
+            return {
+                **{name: [round(float(v), 4) for v in values] for name, values in result.items()},
+                "served_kwh": kwh(result["served_kw"]),
+                "unserved_kwh": kwh(result["unserved_kw"]),
+                "grid_kwh": kwh(result["grid_kw"]),
+                "lost_kwh": kwh(result["lost_kw"]),
+                "stored_end_kwh": round(float(result["stored_kwh"][-1]), 3),
+            }
+
+        return {
+            **status,
+            "steps": n_steps,
+            "teams": len(teams),
+            "demand_kw": [round(float(v), 4) for v in demand],
+            "demand_kwh": kwh(demand),
+            "capacity_kwh": round(float(cap_kwh.sum()), 3),
+            "initial_kwh": round(float(initial_kwh.sum()), 3),
+            "pv_kwh": kwh(rows["pv_kw"]),
+            "load_kwh": kwh(rows["load_kw"]),
+            "actual": summary(actual),
+            "optimum": summary(optimum),
+        }
 
     def reset(self):
         self.market.reset()

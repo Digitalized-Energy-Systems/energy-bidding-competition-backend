@@ -1,5 +1,7 @@
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 import json
+import os
+import pandas as pd
 from abc import abstractmethod, ABC
 from pydantic import BaseModel
 from hackathon_backend.controller import Controller
@@ -19,6 +21,8 @@ from hackathon_backend.units.vpp import VPP
 from hackathon_backend.units.battery import MidasBatteryUnit, BatteryInformation
 from hackathon_backend.units.pv import MidasPVUnit, PVInformation
 from hackathon_backend.units.load import SimpleDemandUnit, DemandInformation
+from hackathon_backend.units.weather import clear_sky_profile
+from hackathon_backend.general_demand import create_general_demand
 
 from hackathon_backend.accounting.account import (
     AccountData,
@@ -63,6 +67,11 @@ class ControllerData(BaseModel):
     step: int
     actor_account_data: Dict[str, AccountData]
     cooperative_bids: List[CooperativeBid] = []
+    actor_to_participant: Dict[str, str] = {}
+    participant_names: Dict[str, str] = {}
+    pv_seed: Optional[int] = None
+    general_demand_supply: Optional[str] = None
+    actor_history: List[Dict[str, Any]] = []
 
 
 def _to_unit(unit_information: Dict):
@@ -74,6 +83,7 @@ def _to_unit(unit_information: Dict):
         ]
         for unit in sub_units:
             vpp.add_unit(unit)
+        return vpp
     elif "soc_percent" in unit_information:
         return MidasBatteryUnit(BatteryInformation(**unit_information))
     elif "a_m2" in unit_information:
@@ -131,7 +141,7 @@ def from_auction_data_list(auction_data_list: List[AuctionData]):
 
 def _as_state(controller: Controller) -> ControllerData:
     return ControllerData(
-        registered=controller.registered,
+        registered=sorted(controller.registered),
         config=controller.config,
         market=MarketData(
             auctions=to_auction_data_dict(controller.market.auctions),
@@ -148,6 +158,15 @@ def _as_state(controller: Controller) -> ControllerData:
         step=controller.step,
         actor_account_data=to_actor_account_datas(controller.actor_accounts),
         cooperative_bids=controller.cooperative_bids.all_bids(),
+        actor_to_participant=controller.actor_to_participant,
+        participant_names=controller.participant_names,
+        pv_seed=controller.pv_seed,
+        actor_history=controller.actor_history,
+        general_demand_supply=(
+            None
+            if controller.general_demand is None
+            else controller.general_demand.supply.to_json()
+        ),
     )
 
 
@@ -159,6 +178,13 @@ def _load_state(controller_data: ControllerData) -> Controller:
         k: _to_actor_unit_root(v)
         for k, v in controller_data.unit_pool.actor_to_root_payload.items()
     }
+    # the forecasts start at the last stepped step, which the unit
+    # information does not carry
+    last_stepped_step = max(0, controller_data.step - 1)
+    for root in controller.unit_pool.actor_to_root.values():
+        for unit in root.sub_units.values():
+            if hasattr(unit, "time_step"):
+                unit.time_step = last_stepped_step
     controller.market.auctions = from_auction_data_dict(controller_data.market.auctions)
     controller.market.open_auctions = from_auction_data_list(
         controller_data.market.open_auctions
@@ -170,8 +196,21 @@ def _load_state(controller_data: ControllerData) -> Controller:
         controller_data.market.current_auction_results
     )
     controller.config = controller_data.config
-    controller.registered = controller_data.registered
+    controller.registered = set(controller_data.registered)
     controller.cooperative_bids = CooperativeBidPool(controller_data.cooperative_bids)
+    controller.actor_history = list(controller_data.actor_history)
+    controller.actor_to_participant = dict(controller_data.actor_to_participant)
+    controller.participant_names = dict(controller_data.participant_names)
+    if controller_data.general_demand_supply is not None:
+        controller.general_demand = create_general_demand("gd0")
+        supply = pd.DataFrame.from_dict(json.loads(controller_data.general_demand_supply))
+        supply.index = supply.index.astype("int64")
+        controller.general_demand.supply = supply.sort_index()
+    if controller_data.pv_seed is not None:
+        controller.set_pv_seed(controller_data.pv_seed)
+    else:
+        # states from before the PV weather have clear-sky units
+        controller.pv_profile = clear_sky_profile()
     return controller
 
 
@@ -189,10 +228,13 @@ class JsonPersistenceHandler:
         return self._load(self.fp)
 
     def _write(self, controller: Controller, fp):
-        with open(fp, "w+") as f:
+        # atomic, so a crash while writing never leaves a truncated state
+        tmp_fp = f"{fp}.tmp"
+        with open(tmp_fp, "w", encoding="utf-8") as f:
             f.write(_as_state(controller).model_dump_json())
+        os.replace(tmp_fp, fp)
 
     def _load(self, json_file) -> Controller:
-        with open(json_file) as jfp:
+        with open(json_file, encoding="utf-8") as jfp:
             json_data = jfp.read()
             return _load_state(ControllerData.model_validate_json(json_data))

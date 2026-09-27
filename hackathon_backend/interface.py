@@ -1,7 +1,7 @@
 import time
 import logging
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Request
 from hackathon_backend.controller import Controller, ControlException
 from hackathon_backend.persistence import JsonPersistenceHandler
 from hackathon_backend.score import CsvScoreHandler
@@ -11,10 +11,26 @@ router = APIRouter()
 controller: Controller = Controller()
 persistence_handler = JsonPersistenceHandler("app_state.json")
 score_handler = CsvScoreHandler(time.time())
-controller.add_after_step_hook(lambda controller: persistence_handler.write(controller))
-controller.add_after_step_hook(lambda controller: score_handler.write(controller))
+
+
+def add_after_step_hooks(controller: Controller):
+    controller.add_after_step_hook(lambda controller: persistence_handler.write(controller))
+    controller.add_after_step_hook(lambda controller: score_handler.write(controller))
+
+
+add_after_step_hooks(controller)
 
 logger = logging.getLogger(__name__)
+
+@router.post("/hackathon/key")
+@router.post("/hackathon/key/")
+async def issue_registration_key(name: str, request: Request):
+    client_ip = request.client.host if request.client else None
+    try:
+        return {"key": await controller.issue_registration_key(name, client_ip)}
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
 
 @router.post("/hackathon/register")
 @router.post("/hackathon/register/")
@@ -33,9 +49,9 @@ async def register_actor(participant_id: str):
 
 @router.get("/units/information")
 @router.get("/units/information/")
-async def read_unit_information(actor_id: str):
+async def read_unit_information(actor_id: str, key: str):
     try:
-        unit_information_list = await controller.read_units(actor_id)
+        unit_information_list = await controller.read_units(actor_id, key)
         return {
             "units": [ui.__dict__ for ui in unit_information_list],
         }
@@ -65,27 +81,12 @@ async def read_market_history():
 @router.post("/market/auction/order")
 @router.post("/market/auction/order/")
 async def place_order(
-    actor_id: str, amount_kw: float, price_ct: float, supply_time: int
+    actor_id: str, key: str, amount_kw: float, price_ct: float, supply_time: int
 ):
     try:
         return {
             "order_ok": await controller.receive_order(
-                [actor_id], [amount_kw], price_ct, supply_time
-            )
-        }
-    except ControlException as e:
-        raise HTTPException(e.code, e.message)
-
-
-@router.post("/market/auction/grouporder")
-@router.post("/market/auction/grouporder/")
-async def place_order(
-    actor_ids: List[str], amount_kw: List[float], price_ct: float, supply_time: int
-):
-    try:
-        return {
-            "order_ok": await controller.receive_order(
-                actor_ids, amount_kw, price_ct, supply_time
+                actor_id, key, amount_kw, price_ct, supply_time
             )
         }
     except ControlException as e:
@@ -94,9 +95,9 @@ async def place_order(
 
 @router.get("/market/auction/result")
 @router.get("/market/auction/result/")
-async def read_auction_result(actor_id: str):
+async def read_auction_result(actor_id: str, key: str):
     try:
-        return await controller.return_awarded_orders(actor_id)
+        return await controller.return_awarded_orders(actor_id, key)
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 
@@ -105,6 +106,7 @@ async def read_auction_result(actor_id: str):
 @router.post("/market/cooperative/propose/")
 async def propose_cooperative_bid(
     actor_id: str,
+    key: str,
     amount_kw: float,
     price_ct: float,
     supply_time: int,
@@ -112,7 +114,7 @@ async def propose_cooperative_bid(
 ):
     try:
         bid = await controller.propose_cooperative_bid(
-            actor_id, amount_kw, price_ct, supply_time, target_amount_kw
+            actor_id, key, amount_kw, price_ct, supply_time, target_amount_kw
         )
         return {"cooperative_bid": bid.to_dict()}
     except ControlException as e:
@@ -122,16 +124,26 @@ async def propose_cooperative_bid(
 @router.post("/market/cooperative/join")
 @router.post("/market/cooperative/join/")
 async def join_cooperative_bid(
-    actor_id: str, cooperative_bid_id: str, amount_kw: float
+    actor_id: str, key: str, cooperative_bid_id: str, amount_kw: float
 ):
     try:
         bid, accepted_amount_kw = await controller.join_cooperative_bid(
-            actor_id, cooperative_bid_id, amount_kw
+            actor_id, key, cooperative_bid_id, amount_kw
         )
         return {
             "cooperative_bid": bid.to_dict(),
             "accepted_amount_kw": accepted_amount_kw,
         }
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+
+
+@router.post("/market/cooperative/withdraw")
+@router.post("/market/cooperative/withdraw/")
+async def withdraw_cooperative_bid(actor_id: str, key: str, cooperative_bid_id: str):
+    try:
+        bid = await controller.withdraw_cooperative_bid(actor_id, key, cooperative_bid_id)
+        return {"cooperative_bid": bid.to_dict()}
     except ControlException as e:
         raise HTTPException(e.code, e.message)
 
@@ -148,9 +160,9 @@ async def read_open_cooperative_bids(supply_time: Optional[int] = None):
 
 @router.get("/market/cooperative/mine")
 @router.get("/market/cooperative/mine/")
-async def read_cooperative_bids_of_actor(actor_id: str):
+async def read_cooperative_bids_of_actor(actor_id: str, key: str):
     try:
-        bids = await controller.return_cooperative_bids_of_actor(actor_id)
+        bids = await controller.return_cooperative_bids_of_actor(actor_id, key)
         return {"cooperative_bids": [bid.to_dict() for bid in bids]}
     except ControlException as e:
         raise HTTPException(e.code, e.message)
@@ -176,12 +188,22 @@ async def read_demand():
 
 @router.post("/admin/load")
 @router.post("/admin/load/")
-async def load_from_file():
+async def load_from_file(admin_token: Optional[str] = None):
     global controller
-    controller = persistence_handler.load()
-    controller.add_after_step_hook(
-        lambda controller: persistence_handler.write(controller)
-    )
+    try:
+        controller.check_admin_token(admin_token)
+    except ControlException as e:
+        raise HTTPException(e.code, e.message)
+    try:
+        loaded = persistence_handler.load()
+    except Exception as e:
+        raise HTTPException(409, f"The state could not be loaded: {e}")
+    # the old loop would keep stepping a controller nobody can reach
+    controller.shutdown()
+    controller = loaded
+    add_after_step_hooks(controller)
+    controller.init()
+    return {"loaded": True, "step": controller.step}
 
 
 @router.get("/ui/auction/results")
@@ -224,4 +246,16 @@ async def last_step_simulation_time():
 @router.get("/ui/participant_map")
 @router.get("/ui/participant_map/")
 async def participant_map():
-    return controller.actor_to_participant
+    return controller.participant_display_names()
+
+
+@router.get("/ui/status")
+@router.get("/ui/status/")
+async def simulation_status():
+    return controller.status()
+
+
+@router.get("/ui/dispatch")
+@router.get("/ui/dispatch/")
+async def system_dispatch():
+    return await controller.system_dispatch()

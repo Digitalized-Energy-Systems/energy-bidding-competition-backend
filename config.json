@@ -8,6 +8,20 @@
     "max_steps": 96,
     "test_mode": true,
     "cooperative_bidding": true,
-    "cooperative_min_order_share": 0.5
+    "issue_registration_keys": true,
+    "max_keys_per_ip": 1,
+
+    "household_load_kw": [0.5, 0.5, 0.5, 0.5, 0.5, 0.6, 0.8, 1.0, 0.9, 0.7, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 0.9, 0.7, 0.6],
+    "demand_per_actor_kw": [0.35, 0.35, 0.35, 0.35, 0.35, 0.35, 0.45, 0.6, 0.6, 0.5, 0.4, 0.35, 0.35, 0.35, 0.35, 0.4, 0.5, 0.55, 0.65, 0.7, 0.65, 0.6, 0.55, 0.45],
+    "pv_peak_kw": 3.0,
+    "battery_capacity_kwh": 12,
+    "battery_charge_max_kw": 2,
+    "battery_discharge_max_kw": 2,
+    "battery_initial_soc_percent": 65,
+
+    "maximum_price_ct": 1000,
+    "shortfall_penalty_ct_per_kw": 250,
+    "grid_penalty_ct_per_kw": 1500,
+    "cooperative_minimum_order_kw": 1.8,
+    "plain_minimum_order_kw": 0.1
 }
- 

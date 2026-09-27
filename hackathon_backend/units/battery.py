@@ -5,6 +5,9 @@ from pysimmods.buffer.batterysim.battery import Battery
 
 logger = logging.getLogger(__name__)
 
+BATTERY_CAPACITY_KWH = 12
+BATTERY_POWER_KW = 2
+
 
 class BatteryInformation(UnitInformation):
     soc_percent: float
@@ -62,9 +65,9 @@ class MidasBatteryUnit(BatteryUnit):
 
 def create_battery(
     id,
-    cap_kwh=12,
-    p_charge_max_kw=2,
-    p_discharge_max_kw=2,
+    cap_kwh=BATTERY_CAPACITY_KWH,
+    p_charge_max_kw=BATTERY_POWER_KW,
+    p_discharge_max_kw=BATTERY_POWER_KW,
     initial_soc=50,
 ):
     return MidasBatteryUnit(

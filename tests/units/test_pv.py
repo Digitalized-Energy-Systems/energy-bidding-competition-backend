@@ -1,18 +1,18 @@
+import math
+import pytest
 from hackathon_backend.units.pv import *
 
 
 def test_pv_step():
     # GIVEN
     pv_unit = MidasPVUnit(
-        id,
-        PhotovoltaicPowerPlant(
-            {
-                "a_m2": 1,
-                "eta_percent": 2,
-            },
-            {"t_module_deg_celsius": 20},
-        ),
-        pv_profile=[10 for i in range(96)],
+        PVInformation(
+            unit_id="pv1",
+            pv_p_kw=[10 for i in range(96)],
+            a_m2=1,
+            eta_percent=2,
+            t_module_deg_celsius=20,
+        )
     )
     input = UnitInput(15 * 60, 1, 1)
 
@@ -21,8 +21,8 @@ def test_pv_step():
     result_60 = pv_unit.step(input, 60, None)
 
     # THEN
-    assert result_35.p_kw == -3.163175018078267e-05
-    assert result_60.p_kw == -3.163175018078273e-05
+    assert result_35.p_kw == pytest.approx(-3.163175018078267e-05, rel=1e-9)
+    assert result_60.p_kw == pytest.approx(-3.163175018078273e-05, rel=1e-9)
 
 
 def test_create_pv():
@@ -38,7 +38,7 @@ def test_create_pv():
 
 def test_check_pv_forecast():
     # GIVEN
-    
+
     # WHEN
     # full cosine profile over N time intervals
     n_intervals = 96
@@ -52,11 +52,9 @@ def test_check_pv_forecast():
         eta_percent=23,
         t_module_deg_celsius=9
     )
-    pv_unit.step(UnitInput(15 * 60, 1, 1), 35, None)
+    measured = pv_unit.step(UnitInput(15 * 60, 1, 1), 35, None)
     result = pv_unit.read_information()
 
-    # print(result.forecast_pv_p_kw)
-    # assert 0 == 1
-    
     assert type(result.forecast_pv_p_kw) == list
     assert len(result.forecast_pv_p_kw) == 9
+    assert result.forecast_pv_p_kw[0] == measured.p_kw

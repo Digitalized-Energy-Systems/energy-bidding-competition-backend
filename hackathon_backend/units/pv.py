@@ -1,4 +1,5 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
+import math
 import random
 from .unit import Unit, UnitInput, UnitResult, UnitInformation
 from pysimmods.generator.pvsim import PhotovoltaicPowerPlant
@@ -10,6 +11,14 @@ N_TIME_INTERVALS = 96
 # Profile typically between 0 and 1000 in Germany (w_per_m2):
 DEFAULT_PV_PROFILE = [1000 for _ in range(N_TIME_INTERVALS)]
 DEFAULT_CONST_TEMP = 20
+# relative forecast error: standard deviation per step of lead time. The
+# error of a target step is correlated between the forecasts issued for it
+# (a common part per target), so averaging them does not remove it, and it
+# is only clipped far out (a tight clip would make forecast / (1 + clip * sd)
+# an exact lower bound of the output)
+FORECAST_ERROR_SD_PER_STEP = 0.03
+FORECAST_ERROR_CORRELATION = 0.7
+FORECAST_ERROR_CLIP_SD = 4
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +28,7 @@ class PVInformation(UnitInformation):
     a_m2: float
     eta_percent: float
     t_module_deg_celsius: float
+    forecast_seed: Optional[int] = None
 
 
 class PVForecastInformation(UnitInformation):
@@ -40,6 +50,7 @@ class MidasPVUnit(Unit):
         )
         self._internal_information = pv_information
         self._profile = pv_information.pv_p_kw
+        self._forecast_seed = pv_information.forecast_seed or 0
         self.forecast_horizon = forecast_horizon
         self.time_step = 0
 
@@ -90,14 +101,25 @@ class MidasPVUnit(Unit):
         p_forecast = []
         for step in range(start_index, end_index):
             result = self.get_pv_power(UnitInput(step_size, None, None), step)
-            # respect growing uncertainty with forecast time
-            step_index = step - start_index
-            factor_uncert = step_index * 0.05
-            factor_const = 1 - factor_uncert
-            # add value to forecast
-            p_forecast.append(result.p_kw * (factor_const + random.uniform(-1, 1) * factor_uncert))
+            error = self.forecast_error(start_index, step)
+            p_forecast.append(result.p_kw * max(0.0, 1 + error))
 
         return p_forecast
+
+    def forecast_error(self, issue_step, target_step):
+        """Unbiased relative error growing with the lead time. It is fixed per
+        (issue step, target step), so repeated reads return the same value,
+        correlated between the forecasts of one target step, and shared by
+        all actors, which have the same weather."""
+        lead = target_step - issue_step
+        if lead <= 0:
+            return 0.0
+        common = random.Random(f"forecast/{self._forecast_seed}/{target_step}").gauss(0, 1)
+        own = random.Random(f"forecast/{self._forecast_seed}/{issue_step}/{target_step}").gauss(0, 1)
+        rho = FORECAST_ERROR_CORRELATION
+        z = rho * common + math.sqrt(1 - rho * rho) * own
+        z = max(-FORECAST_ERROR_CLIP_SD, min(FORECAST_ERROR_CLIP_SD, z))
+        return FORECAST_ERROR_SD_PER_STEP * lead * z
 
     def read_full_information(self) -> UnitInformation:
         return self._internal_information
@@ -109,6 +131,7 @@ def create_pv_unit(
     a_m2=4 * P_PV_PEAK,
     eta_percent=25,
     t_module_deg_celsius=25,
+    forecast_seed=None,
 ):
     return MidasPVUnit(
         PVInformation(
@@ -117,5 +140,6 @@ def create_pv_unit(
             a_m2=a_m2,
             eta_percent=eta_percent,
             t_module_deg_celsius=t_module_deg_celsius,
+            forecast_seed=forecast_seed,
         ),
     )

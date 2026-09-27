@@ -6,6 +6,7 @@ test cases:
 """
 import datetime 
 import random
+import pytest
 from hackathon_backend.market.market import *
 from hackathon_backend.market.auction import *
 
@@ -18,7 +19,7 @@ def test_open_auctions_returned():
         # setup time and inputs
         current_time = time_index * 900
         market_inputs = MarketInputs()
-        market_inputs._now_dt=datetime.datetime.fromtimestamp(current_time) # TODO insert correct time
+        market_inputs._now_dt=current_time
         market_inputs.step_size=900
         market.inputs = market_inputs
         
@@ -61,7 +62,7 @@ def test_order_placed():
         # setup time and inputs
         current_time = time_index * 900
         market_inputs = MarketInputs()
-        market_inputs._now_dt=datetime.datetime.fromtimestamp(current_time) # TODO insert correct time
+        market_inputs._now_dt=current_time
         market_inputs.step_size=900
         market.inputs = market_inputs
         
@@ -89,23 +90,23 @@ def test_order_placed():
         open_auctions = market.get_open_auctions()
         
         market.receive_order(
-            amount_kw=1,
+            amount_kw=[1],
             price_ct=rng.random(),
-            agent="agent1",
+            agents=["agent1"],
             supply_time=current_time + 5*900,
             product_type="electricity"
         )
         market.receive_order(
-            amount_kw=1.5,
+            amount_kw=[1.5],
             price_ct=rng.random(),
-            agent="agent2",
+            agents=["agent2"],
             supply_time=current_time + 5*900,
             product_type="electricity"
         )
         market.receive_order(
-            amount_kw=2,
+            amount_kw=[2],
             price_ct=rng.random(),
-            agent="agent3",
+            agents=["agent3"],
             supply_time=current_time + 5*900,
             product_type="electricity"
         )
@@ -119,14 +120,11 @@ def test_order_placed():
         # auction results sum of awarded amounts
         auction_results = [result for result in market.get_current_auction_results().values()]
         print(auction_results)
-        if  len(auction_results) == 1:
-            2 == [sum([order.awarded_amount_kw for order in result.awarded_orders]) for result in auction_results]
-        elif len(auction_results) > 1:
-            assert all(2 == sum([order.awarded_amount_kw for order in result.awarded_orders]) for result in auction_results)
+        for result in auction_results:
+            assert sum(sum(order.awarded_amount_kw) for order in result.awarded_orders) == pytest.approx(2)
         
         # number of awarded orders
         # check if smaller than or equal to two
         number_awarded_orders = [len(result.awarded_orders) for result in auction_results]
         if number_awarded_orders:
-            assert 2 >= min(number_awarded_orders)
-    # assert 1 == 0
+            assert 2 >= max(number_awarded_orders)

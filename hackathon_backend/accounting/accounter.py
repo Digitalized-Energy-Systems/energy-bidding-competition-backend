@@ -5,18 +5,19 @@ import pandas as pd
 AMOUNT = "Amount in kW"
 PRICE = "Price in ct per kW"
 
-# Penalty rate in ct per kW and quarter hour (a quarter of the price cap of
-# 1000 ct). Power drawn from the grid is charged at this rate (see
-# Controller.step_units), and awarded but not provided power (a shortfall)
-# is charged at the order price but at least at this rate, so that not
-# delivering is never free: an order at 0 ct which blocks the tender still
-# pays for its shortfall.
+# Smallest shortfall rate in ct per kW and quarter hour (a quarter of the
+# price cap of 1000 ct; config.shortfall_penalty_ct_per_kw): awarded but not
+# provided power is charged at the order price but at least at this rate, so that not delivering is never
+# free: an order at 0 ct which blocks the tender still pays for its
+# shortfall. Grid draw is charged separately at
+# config.grid_penalty_ct_per_kw (see Controller.step_units).
 PENALTY_CT_PER_KW = 1000 / 4
 
 
 class ElectricityAskAuctionAccounter:
-    def __init__(self, auction_result: AuctionResult):
+    def __init__(self, auction_result: AuctionResult, shortfall_penalty_ct_per_kw=PENALTY_CT_PER_KW):
         self.result = auction_result
+        self.shortfall_penalty_ct_per_kw = shortfall_penalty_ct_per_kw
         if auction_result is not None:
             self.awarded_orders = self._generate_agent_dataframes()
 
@@ -75,7 +76,7 @@ class ElectricityAskAuctionAccounter:
             )
             shortfall = row[AMOUNT] - order_provided_amount
             payoff += row[PRICE] * order_provided_amount
-            payoff -= max(row[PRICE], PENALTY_CT_PER_KW) * shortfall
+            payoff -= max(row[PRICE], self.shortfall_penalty_ct_per_kw) * shortfall
 
             awarded_amount_added_up = row[AMOUNT] + awarded_amount_added_up
 

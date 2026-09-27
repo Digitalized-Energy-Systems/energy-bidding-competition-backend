@@ -9,8 +9,10 @@ market). Open bids whose auction is no longer open are set to "expired".
 Every amount put into a bid is at least MIN_AMOUNT_KW (or the remaining
 amount, if that is smaller), and a member may top up its amount by joining
 again, so a rival cannot neutralise a bid by joining it with a negligible
-amount which nobody else can fill up. An actor may have at most
-MAX_OPEN_BIDS_PER_ACTOR_PER_AUCTION open proposals per auction.
+amount which nobody else can fill up. A member may withdraw from an open
+bid: its share is removed, and a withdrawing proposer cancels the whole bid
+("withdrawn"). An actor may have at most MAX_OPEN_BIDS_PER_ACTOR_PER_AUCTION
+open proposals per auction.
 
 The awarded group order is accounted per member from each member's own
 awarded share, so the value of the bid is distributed by the power amount
@@ -33,6 +35,7 @@ MAX_OPEN_BIDS_PER_ACTOR_PER_AUCTION = 5
 STATUS_OPEN = "open"
 STATUS_CLOSED = "closed"
 STATUS_EXPIRED = "expired"
+STATUS_WITHDRAWN = "withdrawn"
 
 
 class CooperativeBidError(Exception):
@@ -231,6 +234,37 @@ class CooperativeBidPool:
             accepted_amount_kw,
         )
         return bid, accepted_amount_kw
+
+    def withdraw(self, actor_id: str, cooperative_bid_id: str) -> CooperativeBid:
+        """Remove the actor's share from an open bid; the proposer cancels
+        the whole bid (status "withdrawn")."""
+        bid = self.get(cooperative_bid_id)
+        if bid is None:
+            raise CooperativeBidError(404, "The cooperative bid does not exist!")
+        if bid.status != STATUS_OPEN:
+            raise CooperativeBidError(409, "The cooperative bid is not open!")
+        if not bid.has_member(actor_id):
+            raise CooperativeBidError(
+                400, "The actor is not a member of the cooperative bid!"
+            )
+        if bid.proposer_id == actor_id:
+            bid.status = STATUS_WITHDRAWN
+            logger.info("Cooperative bid %s withdrawn by its proposer", bid.id)
+        else:
+            bid.members = [m for m in bid.members if m.actor_id != actor_id]
+            logger.info("Actor %s withdrew from cooperative bid %s", actor_id, bid.id)
+        return bid
+
+    def open_memberships(self, actor_id: str, auction_id: str) -> int:
+        """Number of open bids of the auction in which the actor is a member;
+        each of them reserves one of the actor's order slots."""
+        return sum(
+            1
+            for bid in self.bids.values()
+            if bid.status == STATUS_OPEN
+            and bid.auction_id == auction_id
+            and bid.has_member(actor_id)
+        )
 
     def expire_for_closed_auctions(self, open_auction_ids) -> List[CooperativeBid]:
         """Set every open bid whose auction is not open anymore to "expired".

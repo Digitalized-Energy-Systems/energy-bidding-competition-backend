@@ -14,6 +14,7 @@ AMOUNT_TOLERANCE_KW = 1e-9
 # orders and group orders count alike), which bounds the order list an
 # actor can create
 MAX_ORDERS_PER_AGENT = 10
+MAXIMUM_PRICE_CT = 1000
 
 
 class OrderError(Exception):
@@ -29,7 +30,7 @@ class AuctionParameters(BaseModel):
     supply_duration_s: int
     tender_amount_kw: float = 0.0
     minimum_order_amount_kw: float = 1.0
-    maximum_price_ct: float = 1000
+    maximum_price_ct: float = MAXIMUM_PRICE_CT
 
 
 class Order(BaseModel):
@@ -74,6 +75,28 @@ class Auction(ABC):
         time dependent actions"""
 
     @abstractmethod
+    def place_order(self, amount_kw, price_ct, agents):
+        """Place an order in the auction"""
+
+
+class ElectricityAskAuction(Auction):
+    """Auction at which market players can sell electricity"""
+
+    def __init__(self, params: AuctionParameters, current_time=None):
+        super().__init__(params, current_time)
+        # container for all orders (only one type of order in this case)
+        self.order_container = OrderContainer()
+
+        # set auction status
+        self.update_status(current_time)
+
+    def step(self, current_time):
+        # perform actions
+        if self.status == "open" and current_time >= self.params.gate_closure_time:
+            self.clear()
+
+        self.update_status(current_time)
+
     def place_order(self, amount_kw, price_ct, agents):
         """Validate and store an order.
 
@@ -165,39 +188,53 @@ class Auction(ABC):
             self.status = "pending"
 
     def clear(self):
-        # sort orders by price
-        self.order_container.orders.sort(key=lambda x: x.price_ct)
-        # find awarded orders: an order only receives power while the tender
-        # is not filled yet, so an exactly filled tender never awards a
-        # further order 0 kW (which would also set the clearing price)
+        """Award the orders cheapest first until the tender is filled. A price
+        level that does not fit completely is shared equally by
+        the actors in it, each capped at what it offered at that price over
+        all its orders, solo and in groups: neither the arrival order nor
+        splitting, inflating or spreading orders over coalitions gains
+        anything. Every member of a group order gets its own fraction."""
         epsilon = 1e-9
+        tender_kw = self.params.tender_amount_kw
+
+        levels = {}
+        for order in self.order_container.orders:
+            levels.setdefault(round(order.price_ct, 6), []).append(order)
+
         awarded_orders = []
         total_awarded_amount = 0
-        for order in self.order_container.orders:
-            remaining = self.params.tender_amount_kw - total_awarded_amount
+        for price in sorted(levels):
+            remaining = tender_kw - total_awarded_amount
+            # an exactly filled tender never awards a further level 0 kW
+            # (which would also set the clearing price)
             if remaining <= epsilon:
                 break
-            order_amount_kw = sum(order.amount_kw)
-            if order_amount_kw <= remaining:
-                # full award
-                awarded_amount_kw = list(order.amount_kw)
-            else:
-                # partial award, split proportionally by amount_kw
-                awarded_amount_kw = [
-                    amount_kw / order_amount_kw * remaining
-                    for amount_kw in order.amount_kw
-                ]
-            awarded_orders.append(
-                AwardedOrder(
-                    auction_id=order.auction_id,
-                    amount_kw=order.amount_kw,
-                    price_ct=order.price_ct,
-                    agents=order.agents,
-                    awarded_amount_kw=awarded_amount_kw,
+            level_orders = levels[price]
+            # an actor's share counts over all its orders at this price, solo
+            # or in groups, so extra orders or coalitions gain it nothing
+            actor_amount_kw = {}
+            for order in level_orders:
+                for agent, amount_kw in zip(order.agents, order.amount_kw):
+                    actor_amount_kw[agent] = actor_amount_kw.get(agent, 0.0) + amount_kw
+            actor_award_kw = _share_equally(actor_amount_kw, remaining)
+            fraction = {
+                agent: actor_award_kw[agent] / amount_kw for agent, amount_kw in actor_amount_kw.items()
+            }
+            for order in level_orders:
+                awarded_orders.append(
+                    AwardedOrder(
+                        auction_id=order.auction_id,
+                        amount_kw=order.amount_kw,
+                        price_ct=order.price_ct,
+                        agents=order.agents,
+                        awarded_amount_kw=[
+                            amount_kw * fraction[agent]
+                            for agent, amount_kw in zip(order.agents, order.amount_kw)
+                        ],
+                    )
                 )
-            )
-            total_awarded_amount += sum(awarded_amount_kw)
-        # find clearing price: price of the last order that received power
+            total_awarded_amount += sum(actor_award_kw.values())
+        # clearing price: price of the last level that received power
         if len(awarded_orders) == 0:
             clearing_price = None
         else:
@@ -220,8 +257,23 @@ class Auction(ABC):
         }
 
 
+def _share_equally(amounts_kw, available_kw):
+    """Split available_kw equally among the actors, none getting more than
+    its amount (water-filling); returns actor -> awarded kW."""
+    awarded = {}
+    remaining = available_kw
+    ordered = sorted(amounts_kw.items(), key=lambda item: item[1])
+    for i, (bidder, amount_kw) in enumerate(ordered):
+        awarded[bidder] = min(amount_kw, remaining / (len(ordered) - i))
+        remaining -= awarded[bidder]
+    return awarded
+
+
 def initiate_electricity_ask_auction(
-    current_time, tender_amount=10, minimum_order_amount_kw=1.0
+    current_time,
+    tender_amount=10,
+    minimum_order_amount_kw=1.0,
+    maximum_price_ct=MAXIMUM_PRICE_CT,
 ):
     # Create AuctionParameters object
     auction_parameters = AuctionParameters(
@@ -233,6 +285,7 @@ def initiate_electricity_ask_auction(
         supply_duration_s=datetime.timedelta(minutes=15).total_seconds(),
         tender_amount_kw=tender_amount,
         minimum_order_amount_kw=minimum_order_amount_kw,
+        maximum_price_ct=maximum_price_ct,
     )
     # Create a new auction
     return ElectricityAskAuction(params=auction_parameters, current_time=current_time)

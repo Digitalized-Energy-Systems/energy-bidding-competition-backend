@@ -5,6 +5,8 @@ import logging
 from hackathon_backend.units.unit import UnitInformation
 from .unit import Unit, UnitInput, UnitResult
 from .battery import BatteryUnit
+from .load import SimpleDemandUnit
+from .pv import MidasPVUnit
 
 
 VPP_ID = "-1"
@@ -20,8 +22,10 @@ class VPPStrategy(ABC):
         other_inputs: Dict[str, UnitInput],
         units: List[Unit],
         step: int,
+        unit_results: Dict[str, UnitResult] = None,
     ) -> UnitResult:
-        pass
+        """Step the units; the result of every unit is stored in
+        unit_results (if given) by unit id."""
 
 
 def find_unit(id, units: List[Unit]):
@@ -37,7 +41,10 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
         other_inputs: Dict[str, UnitInput],
         units: List[Unit],
         step: int,
+        unit_results: Dict[str, UnitResult] = None,
     ) -> UnitResult:
+        if unit_results is None:
+            unit_results = {}
         p_kw_sum = 0
         q_kvar_sum = 0
 
@@ -46,6 +53,7 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
         for unit in [unit for unit in units if not isinstance(unit, BatteryUnit)]:
             result = unit.step(input, step)
             logger.info("Unit %s result: %s", unit.id, result)
+            unit_results[unit.id] = result
             p_kw_sum += result.p_kw
             q_kvar_sum += result.q_kvar
 
@@ -64,6 +72,7 @@ class BatteryAdjustVPPStrategy(VPPStrategy):
                 step,
             )
             logger.info("Unit %s result: %s", unit.id, result)
+            unit_results[unit.id] = result
             p_kw_sum += result.p_kw
             q_kvar_sum += result.q_kvar
 
@@ -90,6 +99,8 @@ class VPP(Unit):
 
         self.strategy = strategy
         self.sub_units = {}
+        # unit id -> result of the last step (consumption positive)
+        self.last_unit_results: Dict[str, UnitResult] = {}
 
     def add_unit(self, unit: Unit):
         self.sub_units[unit.id] = unit
@@ -109,12 +120,36 @@ class VPP(Unit):
                 else:
                     sub_unit.step(input, step, other_inputs=other_inputs)
         else:
+            self.last_unit_results = {}
             return self.strategy.step(
                 input=input,
                 other_inputs=other_inputs,
                 units=self.sub_units.values(),
                 step=step,
+                unit_results=self.last_unit_results,
             )
+
+    def breakdown(self) -> Dict[str, float]:
+        """PV generation, load and battery power of the last step in kW
+        (battery positive while charging) and the battery charge after it."""
+        pv_kw = load_kw = battery_kw = 0.0
+        soc_percent = None
+        for unit in self.sub_units.values():
+            result = self.last_unit_results.get(unit.id)
+            p_kw = 0.0 if result is None else float(result.p_kw)
+            if isinstance(unit, BatteryUnit):
+                battery_kw += p_kw
+                soc_percent = float(unit.read_information().soc_percent)
+            elif isinstance(unit, MidasPVUnit):
+                pv_kw -= p_kw
+            elif isinstance(unit, SimpleDemandUnit):
+                load_kw += p_kw
+        return {
+            "pv_kw": pv_kw,
+            "load_kw": load_kw,
+            "battery_kw": battery_kw,
+            "soc_percent": soc_percent,
+        }
 
     def read_information(self) -> VPPInformation:
         return VPPInformation(

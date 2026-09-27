@@ -1,25 +1,24 @@
 """REST integration of cooperative bidding (without the stepping loop)."""
 
-import os
 import uuid
 from httpx import AsyncClient
 from fastapi import FastAPI
 import pytest
 from hackathon_backend.main import lifespan
 from hackathon_backend.config import load_config
-from hackathon_backend.general_demand import create_general_demand
+from hackathon_backend.general_demand import DEFAULT_LOAD_PROFILE, create_general_demand
 from hackathon_backend.market.cooperative import CooperativeBidPool
 from hackathon_backend.market.tender import (
     supply_step_from_time,
     cooperative_minimum_order_amount_kw,
-    cooperative_tender_amount_kw,
+    plain_minimum_order_amount_kw,
 )
 from hackathon_backend.persistence import JsonPersistenceHandler
 import hackathon_backend.interface as interface
+from tests import helpers
 
-COOPERATIVE_CONFIG = "tests/config_cooperative.json"
-DEFAULT_CONFIG = "tests/config.json"
-TMP_STATE_FILE = "tests/_tmp_state.json"
+COOPERATIVE_CONFIG = str(helpers.COOPERATIVE_CONFIG)
+DEFAULT_CONFIG = str(helpers.PLAIN_CONFIG)
 
 
 @pytest.fixture
@@ -39,6 +38,7 @@ _SHARED_STATE = (
     "registered",
     "actor_accounts",
     "actor_to_participant",
+    "participant_names",
 )
 
 
@@ -50,6 +50,7 @@ def _setup(config_file):
     snapshot["registered"] = set(controller.registered)
     snapshot["actor_accounts"] = dict(controller.actor_accounts)
     snapshot["actor_to_participant"] = dict(controller.actor_to_participant)
+    snapshot["participant_names"] = dict(controller.participant_names)
     snapshot["actor_to_root"] = dict(controller.unit_pool.actor_to_root)
 
     app = FastAPI(lifespan=lifespan)
@@ -90,6 +91,18 @@ async def _register(participant_id):
     return actor_id
 
 
+FIELD = ("TestA", "TestB", "TestC", "TestD", "TestE", "TestF")
+
+
+async def _fill_field():
+    """Register the rest of the smallest field the design is made for (six
+    actors), so the tender holds a minimum-sized order at every step."""
+    registered = set(interface.controller.registered)
+    for participant_id in FIELD:
+        if participant_id not in registered:
+            await _register(participant_id)
+
+
 async def _open_auction(app):
     async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.get("/market/auction/open")
@@ -101,26 +114,25 @@ async def _open_auction(app):
 
 @pytest.mark.anyio
 async def test_cooperative_bidding_flow(setup_controller):
-    # GIVEN three actors and one open auction
+    # GIVEN six actors (the smallest field the design is made for) and one
+    # open auction
     app = setup_controller
     a = await _register("TestA")
     b = await _register("TestB")
     c = await _register("TestC")
+    await _fill_field()
     interface.controller.step_market(current_time=900)
 
-    # THEN the auction carries the cooperative profile of supply step 6
+    # THEN the tender of supply step 6 is the demand of the six actors and
+    # the minimum order amount 1.8 kW
     auction = await _open_auction(app)
     supply_time = auction["supply_start_time"]
-    supply_step = supply_step_from_time(supply_time)
-    assert supply_step == 6
-    minimum = cooperative_minimum_order_amount_kw(supply_step)
-    # three actors: the plain tender (3 * 0.3 kW) is below minimum / share,
-    # so the tender is floored there and two minimum-sized bids fit
-    tender = cooperative_tender_amount_kw(supply_step, round(3 * 0.3, 1), 0.5)
-    assert tender == pytest.approx(2 * minimum)
-    assert auction["minimum_order_amount_kw"] == pytest.approx(minimum)
+    assert supply_step_from_time(supply_time) == 6
+    tender = round(6 * float(DEFAULT_LOAD_PROFILE[6]), 1)
+    minimum = cooperative_minimum_order_amount_kw(tender)
+    assert minimum == pytest.approx(1.8)
     assert auction["tender_amount_kw"] == pytest.approx(tender)
-    assert auction["minimum_order_amount_kw"] <= auction["tender_amount_kw"]
+    assert auction["minimum_order_amount_kw"] == pytest.approx(minimum)
 
     # WHEN A proposes without target
     async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -128,6 +140,7 @@ async def test_cooperative_bidding_flow(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 1.0,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -163,7 +176,12 @@ async def test_cooperative_bidding_flow(setup_controller):
     async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.post(
             "/market/cooperative/join",
-            params={"actor_id": b, "cooperative_bid_id": bid["id"], "amount_kw": 100},
+            params={
+                "actor_id": b,
+                "key": "TestB",
+                "cooperative_bid_id": bid["id"],
+                "amount_kw": 100,
+            },
         )
     # THEN the amount is capped, the bid closes and the group order is placed
     assert response.status_code == 200, response.text
@@ -182,7 +200,12 @@ async def test_cooperative_bidding_flow(setup_controller):
     async with AsyncClient(app=app, base_url="http://test") as ac:
         response = await ac.post(
             "/market/cooperative/join",
-            params={"actor_id": c, "cooperative_bid_id": bid["id"], "amount_kw": 1},
+            params={
+                "actor_id": c,
+                "key": "TestC",
+                "cooperative_bid_id": bid["id"],
+                "amount_kw": 1,
+            },
         )
     # THEN
     assert response.status_code == 409
@@ -193,6 +216,7 @@ async def test_cooperative_bidding_flow(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": minimum,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -207,6 +231,7 @@ async def test_cooperative_bidding_flow(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 0.5,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -222,6 +247,7 @@ async def test_cooperative_bidding_flow(setup_controller):
             "/market/cooperative/propose/",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 0.5,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -237,7 +263,9 @@ async def test_cooperative_bidding_flow(setup_controller):
 
     # THEN the unfilled bid expired and was never submitted
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/market/cooperative/mine", params={"actor_id": a})
+        response = await ac.get(
+            "/market/cooperative/mine", params={"actor_id": a, "key": "TestA"}
+        )
     assert response.status_code == 200
     mine = {x["id"]: x for x in response.json()["cooperative_bids"]}
     assert set(mine.keys()) == {bid["id"], second_bid["id"]}
@@ -250,9 +278,13 @@ async def test_cooperative_bidding_flow(setup_controller):
 
     # THEN B only sees the first bid, C none, the open list is empty
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/market/cooperative/mine/", params={"actor_id": b})
+        response = await ac.get(
+            "/market/cooperative/mine/", params={"actor_id": b, "key": "TestB"}
+        )
         assert [x["id"] for x in response.json()["cooperative_bids"]] == [bid["id"]]
-        response = await ac.get("/market/cooperative/mine", params={"actor_id": c})
+        response = await ac.get(
+            "/market/cooperative/mine", params={"actor_id": c, "key": "TestC"}
+        )
         assert response.json()["cooperative_bids"] == []
         response = await ac.get("/market/cooperative/open")
         assert response.json()["cooperative_bids"] == []
@@ -288,6 +320,7 @@ async def test_cooperative_bidding_not_found_and_price_cap(setup_controller):
     # GIVEN
     app = setup_controller
     a = await _register("TestA")
+    await _fill_field()
     interface.controller.step_market(current_time=900)
     auction = await _open_auction(app)
     supply_time = auction["supply_start_time"]
@@ -298,6 +331,7 @@ async def test_cooperative_bidding_not_found_and_price_cap(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": str(uuid.uuid4()),
+                "key": "TestA",
                 "amount_kw": 1.0,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -309,6 +343,7 @@ async def test_cooperative_bidding_not_found_and_price_cap(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 1.0,
                 "price_ct": 10,
                 "supply_time": supply_time + 900,
@@ -320,6 +355,7 @@ async def test_cooperative_bidding_not_found_and_price_cap(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 0,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -331,6 +367,7 @@ async def test_cooperative_bidding_not_found_and_price_cap(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 0.5,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -343,6 +380,7 @@ async def test_cooperative_bidding_not_found_and_price_cap(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 0.5,
                 "price_ct": auction["maximum_price_ct"] + 500,
                 "supply_time": supply_time,
@@ -356,27 +394,43 @@ async def test_cooperative_bidding_not_found_and_price_cap(setup_controller):
         # unknown bid and unknown actor on join
         response = await ac.post(
             "/market/cooperative/join",
-            params={"actor_id": a, "cooperative_bid_id": "nope", "amount_kw": 1},
+            params={
+                "actor_id": a,
+                "key": "TestA",
+                "cooperative_bid_id": "nope",
+                "amount_kw": 1,
+            },
         )
         assert response.status_code == 404
         response = await ac.post(
             "/market/cooperative/join",
             params={
                 "actor_id": str(uuid.uuid4()),
+                "key": "TestA",
                 "cooperative_bid_id": bid["id"],
                 "amount_kw": 1,
             },
         )
         assert response.status_code == 404
-        # the proposer cannot join its own bid
+        # the proposer tops up its own bid by joining again
         response = await ac.post(
             "/market/cooperative/join",
-            params={"actor_id": a, "cooperative_bid_id": bid["id"], "amount_kw": 1},
+            params={
+                "actor_id": a,
+                "key": "TestA",
+                "cooperative_bid_id": bid["id"],
+                "amount_kw": 1,
+            },
         )
-        assert response.status_code == 400
+        assert response.status_code == 200, response.text
+        assert response.json()["accepted_amount_kw"] == pytest.approx(1)
+        assert response.json()["cooperative_bid"]["members"] == [
+            {"actor_id": a, "amount_kw": 1.5}
+        ]
         # unknown actor on mine
         response = await ac.get(
-            "/market/cooperative/mine", params={"actor_id": str(uuid.uuid4())}
+            "/market/cooperative/mine",
+            params={"actor_id": str(uuid.uuid4()), "key": "TestA"},
         )
         assert response.status_code == 404
 
@@ -388,8 +442,11 @@ async def test_cooperative_bidding_disabled(setup_controller_disabled):
     a = await _register("TestA")
     interface.controller.step_market(current_time=900)
     auction = await _open_auction(app)
-    # the tender follows the general demand and the minimum stays 1 kW
-    assert auction["minimum_order_amount_kw"] == 1.0
+    # the tender follows the general demand and the minimum is the plain one:
+    # 0.1 kW, the resolution of the tender
+    assert auction["minimum_order_amount_kw"] == plain_minimum_order_amount_kw(
+        auction["tender_amount_kw"]
+    )
 
     # WHEN / THEN every cooperative endpoint is refused except the ui one
     async with AsyncClient(app=app, base_url="http://test") as ac:
@@ -397,6 +454,7 @@ async def test_cooperative_bidding_disabled(setup_controller_disabled):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 1.0,
                 "price_ct": 10,
                 "supply_time": auction["supply_start_time"],
@@ -406,12 +464,25 @@ async def test_cooperative_bidding_disabled(setup_controller_disabled):
         assert response.json()["detail"] == "Cooperative bidding is disabled"
         response = await ac.post(
             "/market/cooperative/join",
-            params={"actor_id": a, "cooperative_bid_id": "x", "amount_kw": 1.0},
+            params={
+                "actor_id": a,
+                "key": "TestA",
+                "cooperative_bid_id": "x",
+                "amount_kw": 1.0,
+            },
         )
         assert response.status_code == 403
+        response = await ac.post(
+            "/market/cooperative/withdraw",
+            params={"actor_id": a, "key": "TestA", "cooperative_bid_id": "x"},
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Cooperative bidding is disabled"
         response = await ac.get("/market/cooperative/open")
         assert response.status_code == 403
-        response = await ac.get("/market/cooperative/mine", params={"actor_id": a})
+        response = await ac.get(
+            "/market/cooperative/mine", params={"actor_id": a, "key": "TestA"}
+        )
         assert response.status_code == 403
         response = await ac.get("/ui/cooperative")
         assert response.status_code == 200
@@ -421,7 +492,7 @@ async def test_cooperative_bidding_disabled(setup_controller_disabled):
 
 
 @pytest.mark.anyio
-async def test_cooperative_bids_are_persisted(setup_controller):
+async def test_cooperative_bids_are_persisted(setup_controller, tmp_path):
     # GIVEN a proposed bid with one further member
     app = setup_controller
     a = await _register("TestA")
@@ -430,19 +501,15 @@ async def test_cooperative_bids_are_persisted(setup_controller):
     interface.controller.step_market(current_time=900)
     auction = await _open_auction(app)
     bid = await interface.controller.propose_cooperative_bid(
-        a, 0.5, 10, auction["supply_start_time"]
+        a, "TestA", 0.5, 10, auction["supply_start_time"]
     )
-    await interface.controller.join_cooperative_bid(b, bid.id, 0.25)
+    await interface.controller.join_cooperative_bid(b, "TestB", bid.id, 0.25)
     assert bid.status == "open"
 
     # WHEN the state is written and loaded again
-    handler = JsonPersistenceHandler(TMP_STATE_FILE)
-    try:
-        handler.write(interface.controller)
-        loaded = handler.load()
-    finally:
-        if os.path.exists(TMP_STATE_FILE):
-            os.remove(TMP_STATE_FILE)
+    handler = JsonPersistenceHandler(str(tmp_path / "app_state.json"))
+    handler.write(interface.controller)
+    loaded = handler.load()
 
     # THEN the loaded controller holds the same bid
     loaded_bids = loaded.cooperative_bids.all_bids()
@@ -455,7 +522,6 @@ async def test_cooperative_bids_are_persisted(setup_controller):
     assert loaded_bid.filled_amount_kw == pytest.approx(0.75)
     assert loaded.config.cooperative_bidding is True
     assert loaded.cooperative_bids.open_bids() == [loaded_bid]
-    assert not os.path.exists(TMP_STATE_FILE)
 
     # THEN the restored auctions keep their persisted ids, so the bid still
     # refers to an auction the market knows
@@ -475,7 +541,7 @@ async def test_cooperative_bids_are_persisted(setup_controller):
 
     # THEN the restored bid stays open and can still be filled and placed
     assert loaded_bid.status == "open"
-    joined, accepted = await loaded.join_cooperative_bid(c, loaded_bid.id, 100)
+    joined, accepted = await loaded.join_cooperative_bid(c, "TestC", loaded_bid.id, 100)
     assert joined is loaded_bid
     assert accepted == pytest.approx(loaded_bid.target_amount_kw - 0.75)
     assert loaded_bid.status == "closed"
@@ -488,10 +554,10 @@ async def test_cooperative_bids_are_persisted(setup_controller):
     # AND a bid proposed after the reload can be placed as well
     auctions = await loaded.return_open_auction_params()
     new_bid = await loaded.propose_cooperative_bid(
-        a, 0.5, 10, auctions[-1]["supply_start_time"]
+        a, "TestA", 0.5, 10, auctions[-1]["supply_start_time"]
     )
     assert new_bid.auction_id in loaded.market.auctions
-    new_bid, _ = await loaded.join_cooperative_bid(b, new_bid.id, 100)
+    new_bid, _ = await loaded.join_cooperative_bid(b, "TestB", new_bid.id, 100)
     assert new_bid.status == "closed"
     assert new_bid.order_placed is True
 
@@ -510,6 +576,7 @@ async def test_cooperative_bidding_rejects_nan(setup_controller):
             "/market/cooperative/propose",
             params={
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 0.5,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -523,6 +590,7 @@ async def test_cooperative_bidding_rejects_nan(setup_controller):
         for nan_param in ("amount_kw", "price_ct", "target_amount_kw"):
             params = {
                 "actor_id": a,
+                "key": "TestA",
                 "amount_kw": 0.5,
                 "price_ct": 10,
                 "supply_time": supply_time,
@@ -535,7 +603,12 @@ async def test_cooperative_bidding_rejects_nan(setup_controller):
         # WHEN a NaN is passed to join
         response = await ac.post(
             "/market/cooperative/join",
-            params={"actor_id": b, "cooperative_bid_id": bid["id"], "amount_kw": "nan"},
+            params={
+                "actor_id": b,
+                "key": "TestB",
+                "cooperative_bid_id": bid["id"],
+                "amount_kw": "nan",
+            },
         )
         # THEN
         assert response.status_code == 400, response.text
@@ -548,7 +621,9 @@ async def test_cooperative_bidding_rejects_nan(setup_controller):
         response = await ac.get("/market/cooperative/open")
         assert response.status_code == 200
         assert response.json()["cooperative_bids"] == [bid]
-        response = await ac.get("/market/cooperative/mine", params={"actor_id": a})
+        response = await ac.get(
+            "/market/cooperative/mine", params={"actor_id": a, "key": "TestA"}
+        )
         assert response.status_code == 200
         assert response.json()["cooperative_bids"] == [bid]
         response = await ac.get("/ui/cooperative")
@@ -558,51 +633,121 @@ async def test_cooperative_bidding_rejects_nan(setup_controller):
         # AND a finite join still fills and places the bid
         response = await ac.post(
             "/market/cooperative/join",
-            params={"actor_id": b, "cooperative_bid_id": bid["id"], "amount_kw": 100},
+            params={
+                "actor_id": b,
+                "key": "TestB",
+                "cooperative_bid_id": bid["id"],
+                "amount_kw": 100,
+            },
         )
         assert response.status_code == 200, response.text
         assert response.json()["cooperative_bid"]["status"] == "closed"
         assert response.json()["cooperative_bid"]["order_placed"] is True
 
 
+async def _withdraw(ac, actor_id, key, cooperative_bid_id):
+    return await ac.post(
+        "/market/cooperative/withdraw",
+        params={"actor_id": actor_id, "key": key, "cooperative_bid_id": cooperative_bid_id},
+    )
+
+
 @pytest.mark.anyio
-async def test_group_order_endpoint_is_refused_while_cooperative(setup_controller):
-    # GIVEN two actors and an open auction in cooperative mode
+async def test_withdraw_from_cooperative_bid(setup_controller):
+    # GIVEN a bid of A which B and C joined
     app = setup_controller
     a = await _register("TestA")
     b = await _register("TestB")
+    c = await _register("TestC")
+    await _fill_field()
     interface.controller.step_market(current_time=900)
     auction = await _open_auction(app)
-    supply_time = auction["supply_start_time"]
+    bid = await interface.controller.propose_cooperative_bid(
+        a, "TestA", 1.0, 10, auction["supply_start_time"]
+    )
+    await interface.controller.join_cooperative_bid(b, "TestB", bid.id, 0.3)
+    await interface.controller.join_cooperative_bid(c, "TestC", bid.id, 0.2)
 
-    # WHEN A places a group order naming B without B's consent
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.post(
-            "/market/auction/grouporder",
-            json={"actor_ids": [a, b], "amount_kw": [1.0, 3.0]},
-            params={"price_ct": 10, "supply_time": supply_time},
-        )
-        # THEN it is refused and points to the cooperative endpoints
-        assert response.status_code == 403, response.text
-        assert "/market/cooperative" in response.json()["detail"]
-        auction_id = interface.controller.market._get_auction_id_from_supply_time_and_product_type(
-            supply_time, "electricity"
-        )
-        orders = interface.controller.market.auctions[auction_id].order_container.orders
-        assert orders == []
+        # WHEN B withdraws
+        response = await _withdraw(ac, b, "TestB", bid.id)
 
-        # AND a single-agent order through the normal endpoint still works
+        # THEN B's share is removed and the bid stays open
+        assert response.status_code == 200, response.text
+        left = response.json()["cooperative_bid"]
+        assert left["status"] == "open"
+        assert left["members"] == [
+            {"actor_id": a, "amount_kw": 1.0},
+            {"actor_id": c, "amount_kw": 0.2},
+        ]
+        assert left["filled_amount_kw"] == pytest.approx(1.2)
+        response = await ac.get("/market/cooperative/open")
+        assert [x["id"] for x in response.json()["cooperative_bids"]] == [bid.id]
+
+        # WHEN B withdraws again, or for an unknown bid or actor
+        assert (await _withdraw(ac, b, "TestB", bid.id)).status_code == 400
+        assert (await _withdraw(ac, b, "TestB", "nope")).status_code == 404
+        response = await _withdraw(ac, str(uuid.uuid4()), "TestB", bid.id)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "The actor id does not exist!"
+        # AND C tries it with B's key
+        assert (await _withdraw(ac, c, "TestB", bid.id)).status_code == 403
+        assert interface.controller.cooperative_bids.get(bid.id).actor_ids == [a, c]
+
+        # WHEN the proposer withdraws
+        response = await _withdraw(ac, a, "TestA", bid.id)
+
+        # THEN the whole bid is cancelled
+        assert response.status_code == 200, response.text
+        assert response.json()["cooperative_bid"]["status"] == "withdrawn"
+        response = await ac.get("/market/cooperative/open")
+        assert response.json()["cooperative_bids"] == []
+        response = await ac.get(
+            "/market/cooperative/mine", params={"actor_id": c, "key": "TestC"}
+        )
+        assert [x["status"] for x in response.json()["cooperative_bids"]] == ["withdrawn"]
+        # AND it can neither be joined nor left any more
         response = await ac.post(
-            "/market/auction/order",
+            "/market/cooperative/join",
             params={
-                "actor_id": a,
-                "amount_kw": auction["minimum_order_amount_kw"],
-                "price_ct": 10,
-                "supply_time": supply_time,
+                "actor_id": b,
+                "key": "TestB",
+                "cooperative_bid_id": bid.id,
+                "amount_kw": 100,
             },
         )
-        assert response.status_code == 200, response.text
-        assert response.json()["order_ok"] is True
-        orders = interface.controller.market.auctions[auction_id].order_container.orders
-        assert len(orders) == 1
-        assert orders[0].agents == [a]
+        assert response.status_code == 409
+        assert (await _withdraw(ac, c, "TestC", bid.id)).status_code == 409
+
+    # AND it was never placed
+    auction_id = bid.auction_id
+    assert interface.controller.market.auctions[auction_id].order_container.orders == []
+
+
+@pytest.mark.anyio
+async def test_withdraw_from_placed_bid_is_refused(setup_controller):
+    # GIVEN a filled bid whose group order is placed
+    app = setup_controller
+    a = await _register("TestA")
+    b = await _register("TestB")
+    await _fill_field()
+    interface.controller.step_market(current_time=900)
+    auction = await _open_auction(app)
+    bid = await interface.controller.propose_cooperative_bid(
+        a, "TestA", 1.0, 10, auction["supply_start_time"]
+    )
+    await interface.controller.join_cooperative_bid(b, "TestB", bid.id, 100)
+    assert bid.status == "closed" and bid.order_placed
+
+    # WHEN a member or the proposer withdraws
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        responses = [
+            await _withdraw(ac, b, "TestB", bid.id),
+            await _withdraw(ac, a, "TestA", bid.id),
+        ]
+
+    # THEN it is refused and the order stays in the market
+    assert [r.status_code for r in responses] == [409, 409]
+    assert bid.status == "closed"
+    orders = interface.controller.market.auctions[bid.auction_id].order_container.orders
+    assert [order.agents for order in orders] == [[a, b]]

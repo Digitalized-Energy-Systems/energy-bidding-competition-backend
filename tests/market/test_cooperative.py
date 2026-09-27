@@ -156,17 +156,34 @@ def test_join_exact_fill_closes_bid():
     assert bid.status == "closed"
 
 
-def test_duplicate_join_by_member_raises():
+def test_member_joining_again_tops_up_its_amount():
+    # GIVEN
     pool = CooperativeBidPool()
     bid = _propose(pool)
-    with pytest.raises(CooperativeBidError) as e:
-        pool.join("A", bid.id, 0.5)
-    assert e.value.code == 400
     pool.join("B", bid.id, 0.5)
-    with pytest.raises(CooperativeBidError) as e:
-        pool.join("B", bid.id, 0.5)
-    assert e.value.code == 400
+
+    # WHEN the proposer and a member join again
+    _, accepted_a = pool.join("A", bid.id, 0.5)
+    _, accepted_b = pool.join("B", bid.id, 0.1)
+
+    # THEN their amounts grow, no member is listed twice
+    assert accepted_a == pytest.approx(0.5)
+    assert accepted_b == pytest.approx(0.1)
     assert bid.actor_ids == ["A", "B"]
+    assert bid.member_amounts_kw == pytest.approx([1.5, 0.6])
+    assert bid.status == "open"
+
+    # AND a top-up below the smallest amount is refused
+    with pytest.raises(CooperativeBidError) as e:
+        pool.join("B", bid.id, 0.05)
+    assert e.value.code == 400
+    assert bid.member_amounts_kw == pytest.approx([1.5, 0.6])
+
+    # AND a top-up which fills the target closes the bid
+    _, accepted = pool.join("A", bid.id, 100)
+    assert accepted == pytest.approx(0.9)
+    assert bid.status == "closed"
+    assert bid.member_amounts_kw == pytest.approx([2.4, 0.6])
 
 
 def test_join_invalid_amount_raises():
@@ -279,3 +296,110 @@ def test_to_dict_matches_contract_and_model_round_trip():
     assert restored_pool.get(bid.id).members[1] == CooperativeMember(
         actor_id="B", amount_kw=0.5
     )
+
+
+def test_withdrawing_member_leaves_and_the_bid_stays_open():
+    # GIVEN
+    pool = CooperativeBidPool()
+    bid = _propose(pool)
+    pool.join("B", bid.id, 0.5)
+    pool.join("C", bid.id, 0.3)
+
+    # WHEN
+    withdrawn = pool.withdraw("B", bid.id)
+
+    # THEN B's share is removed and the others stay
+    assert withdrawn is bid
+    assert bid.status == "open"
+    assert bid.actor_ids == ["A", "C"]
+    assert bid.filled_amount_kw == pytest.approx(1.3)
+    assert pool.open_bids() == [bid]
+    assert pool.bids_for_actor("B") == []
+
+    # AND B may join again
+    pool.join("B", bid.id, 0.2)
+    assert bid.actor_ids == ["A", "C", "B"]
+
+
+def test_withdrawing_proposer_cancels_the_bid():
+    # GIVEN
+    pool = CooperativeBidPool()
+    bid = _propose(pool)
+    pool.join("B", bid.id, 0.5)
+
+    # WHEN
+    pool.withdraw("A", bid.id)
+
+    # THEN
+    assert bid.status == "withdrawn"
+    assert bid.order_placed is False
+    assert pool.open_bids() == []
+    assert pool.bids_for_actor("B") == [bid]
+    with pytest.raises(CooperativeBidError) as e:
+        pool.join("C", bid.id, 1.0)
+    assert e.value.code == 409
+    # a withdrawn bid is no open proposal any more
+    for _ in range(5):
+        _propose(pool)
+
+
+@pytest.mark.parametrize("status", ["closed", "expired", "withdrawn"])
+def test_withdraw_from_a_bid_which_is_not_open_raises(status):
+    pool = CooperativeBidPool()
+    bid = _propose(pool)
+    pool.join("B", bid.id, 0.5)
+    if status == "closed":
+        pool.join("C", bid.id, 100)
+    elif status == "expired":
+        pool.expire_for_closed_auctions([])
+    else:
+        pool.withdraw("A", bid.id)
+    assert bid.status == status
+    members = list(bid.members)
+
+    for actor_id in ("A", "B"):
+        with pytest.raises(CooperativeBidError) as e:
+            pool.withdraw(actor_id, bid.id)
+        assert e.value.code == 409
+    assert bid.members == members
+
+
+def test_withdraw_by_non_member_or_from_unknown_bid_raises():
+    pool = CooperativeBidPool()
+    bid = _propose(pool)
+    with pytest.raises(CooperativeBidError) as e:
+        pool.withdraw("B", bid.id)
+    assert e.value.code == 400
+    with pytest.raises(CooperativeBidError) as e:
+        pool.withdraw("A", "does-not-exist")
+    assert e.value.code == 404
+    assert bid.status == "open"
+    assert bid.actor_ids == ["A"]
+
+
+def test_open_memberships_count_open_bids_of_the_auction():
+    # GIVEN A is a member of bids in two auctions with every status
+    pool = CooperativeBidPool()
+    own = _propose(pool, actor_id="A", auction_id="auction-1")
+    joined = _propose(pool, actor_id="B", auction_id="auction-1")
+    pool.join("A", joined.id, 0.5)
+    closed = _propose(pool, actor_id="C", auction_id="auction-1")
+    pool.join("A", closed.id, 100)
+    withdrawn = _propose(pool, actor_id="A", auction_id="auction-1")
+    pool.withdraw("A", withdrawn.id)
+    left = _propose(pool, actor_id="D", auction_id="auction-1")
+    pool.join("A", left.id, 0.5)
+    pool.withdraw("A", left.id)
+    _propose(pool, actor_id="A", auction_id="auction-2")
+    assert closed.status == "closed"
+
+    # THEN only the open bids of the auction count
+    assert pool.open_memberships("A", "auction-1") == 2
+    assert pool.open_memberships("A", "auction-2") == 1
+    assert pool.open_memberships("B", "auction-1") == 1
+    assert pool.open_memberships("E", "auction-1") == 0
+
+    # WHEN the auction closes, its bids expire and free the slots
+    pool.expire_for_closed_auctions({"auction-2"})
+    assert pool.open_memberships("A", "auction-1") == 0
+    assert own.status == "expired"

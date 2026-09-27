@@ -5,8 +5,11 @@ __pycache__
 .coverage
 htmlcov/
 app_state.json
+registration_keys.json*
 dgh-backend.log
 *.csv
 results/
 build/
 *.egg-info
+situation*.html
+plotly.min.js

@@ -1,15 +1,19 @@
-import math
 import numpy as np
 import pandas as pd
+from hackathon_backend.profiles import DEMAND_PER_ACTOR_KW, hourly_to_steps
 from hackathon_backend.units.load import *
 
 
 N_TIME_INTERVALS = 96
-cos_values = np.array(
-    [math.cos(2 * math.pi * x / N_TIME_INTERVALS) for x in range(N_TIME_INTERVALS)]
-)
-cos_amplitude = 0.1
-DEFAULT_LOAD_PROFILE = 0.4 * np.ones(N_TIME_INTERVALS) - cos_amplitude * cos_values
+# demand per registered actor, see hackathon_backend/profiles.py
+DEFAULT_LOAD_PROFILE = np.array(hourly_to_steps(DEMAND_PER_ACTOR_KW, N_TIME_INTERVALS))
+
+
+def demand_per_actor_profile(hourly_kw=DEMAND_PER_ACTOR_KW, steps=N_TIME_INTERVALS):
+    """The market demand per registered actor for every step of the day in
+    kW: the hourly values (config demand_per_actor_kw), linear in between,
+    rounded to 1 W like the profile of the general demand unit."""
+    return [float(value) for value in np.round(np.array(hourly_to_steps(hourly_kw, steps)), 3)]
 
 TENDER_AMOUNT = "tender_amount_kw"
 PROVIDED_AMOUNT = "provided_amount_kw"
@@ -44,10 +48,10 @@ class GeneralDemand(SimpleDemandUnit):
             ignore_index=True,
         )
         # calculate provided share
-        if self.supply[TENDER_AMOUNT].sum() != 0:
-            self.supply.at[self.supply.index[-1], PROVIDED_SHARE] = (
-                self.supply[PROVIDED_AMOUNT].sum() / self.supply[TENDER_AMOUNT].sum()
-            )
+        tender = self.supply[TENDER_AMOUNT].astype(float)
+        if tender.sum() != 0:
+            served = self.supply[PROVIDED_AMOUNT].astype(float).clip(upper=tender)
+            self.supply.at[self.supply.index[-1], PROVIDED_SHARE] = served.sum() / tender.sum()
 
 
 def create_general_demand(
@@ -61,10 +65,10 @@ def create_general_demand(
             DemandInformation(
                 unit_id=id,
                 perfect_demand_p_kw=np.round(
-                    number_of_actors * DEFAULT_LOAD_PROFILE, 1
+                    number_of_actors * DEFAULT_LOAD_PROFILE, 3
                 ),
                 perfect_demand_q_kvar=np.round(
-                    number_of_actors * DEFAULT_LOAD_PROFILE, 1
+                    number_of_actors * DEFAULT_LOAD_PROFILE, 3
                 ),
                 uncertainty=1,
             ),
